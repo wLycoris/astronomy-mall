@@ -8,13 +8,34 @@ import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 /**
- * Web配置类
+ * Web MVC配置类
  */
 @Configuration
 public class WebMvcConfig implements WebMvcConfigurer {
 
     @Autowired
     private JwtInterceptor jwtInterceptor;
+
+    /**
+     * 配置拦截器
+     */
+    @Override
+    public void addInterceptors(InterceptorRegistry registry) {
+        registry.addInterceptor(jwtInterceptor)
+                .addPathPatterns("/api/**")  // 拦截所有/api/**请求
+                .excludePathPatterns(
+                        // Knife4j文档相关
+                        "/doc.html",
+                        "/swagger-resources/**",
+                        "/v3/api-docs/**",
+                        "/webjars/**",
+                        "/favicon.ico",
+
+                        // 静态资源
+                        "/static/**",
+                        "/images/**"
+                );
+    }
 
     /**
      * 配置跨域
@@ -27,23 +48,5 @@ public class WebMvcConfig implements WebMvcConfigurer {
                 .allowedHeaders("*")
                 .allowCredentials(true)
                 .maxAge(3600);
-    }
-
-    /**
-     * 配置拦截器
-     */
-    @Override
-    public void addInterceptors(InterceptorRegistry registry) {
-        registry.addInterceptor(jwtInterceptor)
-                .addPathPatterns("/api/**")
-                .excludePathPatterns(
-                        "/api/user/register",    // 注册
-                        "/api/user/login",       // 登录
-                        "/doc.html",             // 接口文档
-                        "/swagger-resources/**",
-                        "/webjars/**",
-                        "/v2/api-docs",
-                        "/favicon.ico"
-                );
     }
 }
