@@ -1,59 +1,113 @@
 package com.astronomy.mall.module.product.entity;
 
 import com.baomidou.mybatisplus.annotation.*;
-import io.swagger.annotations.ApiModel;
-import io.swagger.annotations.ApiModelProperty;
 import lombok.Data;
 import java.time.LocalDateTime;
 
+/**
+ * 商品评价实体类
+ * 对应数据库表: tb_review
+ *
+ * 功能说明:
+ * 1. 用户对已完成订单的商品进行评价
+ * 2. 支持评分(1-5星)、文字内容、图片(最多5张)
+ * 3. 支持匿名评价
+ * 4. 商家可以回复评价
+ * 5. 其他用户可以点赞评价
+ *
+ * @author Astronomy Mall Team
+ * @since 2025-01-XX
+ */
 @Data
 @TableName("tb_review")
-@ApiModel(description = "商品评价实体")
 public class Review {
 
-    @ApiModelProperty("评价ID")
+    /**
+     * 评价ID - 主键
+     */
     @TableId(type = IdType.AUTO)
     private Long id;
 
-    @ApiModelProperty("商品ID")
+    /**
+     * 商品ID - 外键关联 tb_product.id
+     */
     private Long productId;
 
-    @ApiModelProperty("用户ID")
+    /**
+     * 用户ID - 外键关联 tb_user.id
+     */
     private Long userId;
 
-    @ApiModelProperty("订单ID")
+    /**
+     * 订单ID - 外键关联 tb_order.id
+     * 一个订单只能评价一次
+     */
     private Long orderId;
 
-    @ApiModelProperty("评分(1-5星)")
+    /**
+     * 评分(1-5星)
+     * 1星:非常差, 2星:差, 3星:一般, 4星:好, 5星:非常好
+     */
     private Integer rating;
 
-    @ApiModelProperty("评价内容")
+    /**
+     * 评价内容 - 文字描述
+     * 可以为空(只打分不评论)
+     */
     private String content;
 
-    @ApiModelProperty("评价图片(多张,逗号分隔)")
+    /**
+     * 评价图片 - JSON数组格式
+     * 示例: ["https://xxx.jpg", "https://yyy.jpg"]
+     * 最多5张图片
+     */
     private String images;
 
-    @ApiModelProperty("是否匿名(0-否 1-是)")
+    /**
+     * 是否匿名评价
+     * 0-否(显示用户昵称), 1-是(显示"匿名用户")
+     */
     private Integer isAnonymous;
 
-    @ApiModelProperty("点赞数")
+    /**
+     * 点赞数 - 其他用户点赞数量
+     * 通过 tb_review_like 表统计
+     */
     private Integer likeCount;
 
-    @ApiModelProperty("商家回复")
+    /**
+     * 评价状态
+     * 0-已删除, 1-正常显示, 2-待审核
+     */
+    private Integer status;
+
+    /**
+     * 商家回复内容
+     * 商家可以对用户评价进行一次回复
+     */
     private String reply;
 
-    @ApiModelProperty("回复时间")
+    /**
+     * 商家回复时间
+     */
     private LocalDateTime replyTime;
 
-    @ApiModelProperty("创建时间")
+    /**
+     * 创建时间 - 评价发布时间
+     */
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;
 
-    @ApiModelProperty("更新时间")
+    /**
+     * 更新时间 - 最后修改时间
+     */
     @TableField(fill = FieldFill.INSERT_UPDATE)
     private LocalDateTime updateTime;
 
-    @ApiModelProperty("逻辑删除(0-否 1-是)")
+    /**
+     * 逻辑删除标记
+     * 0-未删除, 1-已删除
+     */
     @TableLogic
     private Integer deleted;
 }

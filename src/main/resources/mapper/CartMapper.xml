@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.astronomy.mall.module.cart.mapper.CartMapper">
+
+    <resultMap id="CartVOMap" type="com.astronomy.mall.module.cart.vo.CartVO">
+        <id property="id" column="id"/>
+        <result property="userId" column="user_id"/>
+        <result property="productId" column="product_id"/>
+        <result property="quantity" column="quantity"/>
+        <result property="selected" column="selected"/>
+        <result property="createTime" column="create_time"/>
+
+        <!-- 商品信息 -->
+        <result property="productName" column="product_name"/>
+        <result property="productImage" column="product_image"/>
+        <result property="productPrice" column="product_price"/>
+        <result property="productBrand" column="product_brand"/>
+        <result property="stock" column="stock"/>
+    </resultMap>
+
+    <!-- 查询购物车列表(关联商品信息) -->
+    <select id="selectCartListWithProduct" resultMap="CartVOMap">
+        SELECT
+            c.id, c.user_id, c.product_id, c.quantity, c.selected, c.create_time,
+            p.product_name, p.main_image AS product_image, p.price AS product_price,
+            p.brand AS product_brand, p.stock
+        FROM tb_cart c
+                 LEFT JOIN tb_product p ON c.product_id = p.id
+        WHERE c.user_id = #{userId}
+        ORDER BY c.create_time DESC
+    </select>
+
+    <!-- 查询用户选中的购物车项 -->
+    <select id="selectSelectedCartItems" resultMap="CartVOMap">
+        SELECT
+            c.id, c.user_id, c.product_id, c.quantity, c.selected, c.create_time,
+            p.product_name, p.main_image AS product_image, p.price AS product_price,
+            p.brand AS product_brand, p.stock
+        FROM tb_cart c
+                 LEFT JOIN tb_product p ON c.product_id = p.id
+        WHERE c.user_id = #{userId} AND c.selected = 1
+        ORDER BY c.create_time DESC
+    </select>
+
+</mapper>
