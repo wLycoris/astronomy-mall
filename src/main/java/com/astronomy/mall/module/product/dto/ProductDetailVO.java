@@ -53,6 +53,9 @@ public class ProductDetailVO {
     @ApiModelProperty("规格参数(JSON格式)")
     private String specifications;
 
+    @ApiModelProperty("商品标签")
+    private String tags;
+
     @ApiModelProperty("是否热卖")
     private Integer isHot;
 

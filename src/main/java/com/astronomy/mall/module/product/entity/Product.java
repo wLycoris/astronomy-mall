@@ -52,6 +52,10 @@ public class Product {
     @ApiModelProperty("规格参数(JSON格式)")
     private String specifications;
 
+    // 🔥 新增: 商品标签字段
+    @ApiModelProperty("商品标签(JSON数组,如[\"天文望远镜\",\"入门级\",\"便携式\"])")
+    private String tags;
+
     @ApiModelProperty("商品状态(0-下架 1-上架)")
     private Integer status;
 

@@ -1,9 +1,11 @@
 package com.astronomy.mall.module.product.service;
 
 import com.astronomy.mall.module.product.dto.CategoryVO;
+import com.astronomy.mall.module.product.entity.Category; // 导入实体类
+import com.baomidou.mybatisplus.extension.service.IService; // 导入 IService
 import java.util.List;
 
-public interface CategoryService {
+public interface CategoryService extends IService<Category> {
 
     /**
      * 获取所有分类树(包含子分类)

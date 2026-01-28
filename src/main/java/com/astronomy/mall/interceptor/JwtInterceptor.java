@@ -4,6 +4,7 @@ import cn.hutool.core.util.StrUtil;
 import com.astronomy.mall.common.exception.BusinessException;
 import com.astronomy.mall.common.result.ResultCode;
 import com.astronomy.mall.utils.JwtUtil;
+import com.astronomy.mall.utils.UserContext;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
@@ -72,7 +73,7 @@ public class JwtInterceptor implements HandlerInterceptor {
             token = token.substring(7);
         }
 
-        // 5. 验证token (使用正确的方法名)
+        // 5. 验证token
         try {
             Long userId = jwtUtil.getUserIdFromToken(token);
             if (userId == null) {
@@ -84,14 +85,26 @@ public class JwtInterceptor implements HandlerInterceptor {
                 throw new BusinessException(ResultCode.TOKEN_EXPIRED);
             }
 
-            // 将用户ID存入request,供后续使用
+            // 🔥 关键修改：同时设置到 request 和 ThreadLocal
             request.setAttribute("userId", userId);
+            UserContext.setUserId(userId); // ✅ 添加这行代码
+
             return true;
         } catch (BusinessException e) {
             throw e;
         } catch (Exception e) {
             throw new BusinessException(ResultCode.TOKEN_INVALID);
         }
+    }
+
+    /**
+     * 🔥 新增方法：请求完成后清理 ThreadLocal
+     * 防止内存泄漏
+     */
+    @Override
+    public void afterCompletion(HttpServletRequest request, HttpServletResponse response,
+                                Object handler, Exception ex) {
+        UserContext.clear(); // ✅ 清理 ThreadLocal
     }
 
     /**

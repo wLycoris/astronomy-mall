@@ -2,11 +2,12 @@ package com.astronomy.mall.module.user.service;
 
 import com.astronomy.mall.module.user.dto.*;
 import com.astronomy.mall.module.user.entity.User;
+import com.baomidou.mybatisplus.extension.service.IService;
 
 /**
  * 用户服务接口
  */
-public interface UserService {
+public interface UserService extends IService<User> {
 
     /**
      * 用户注册
