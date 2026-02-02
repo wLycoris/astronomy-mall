@@ -210,6 +210,10 @@ public class OrderServiceImpl implements OrderService {
         orderMapper.updateById(order);
     }
 
+    /**
+     * 确认收货
+     * 🆕 修改: 同时更新物流状态为已签收
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void confirmReceipt(Long userId, Long orderId) {
@@ -225,6 +229,7 @@ public class OrderServiceImpl implements OrderService {
 
         order.setStatus(3); // 已完成
         order.setFinishTime(LocalDateTime.now());
+        order.setLogisticsStatus(3); // 🆕 同时更新物流状态为已签收
         orderMapper.updateById(order);
     }
 

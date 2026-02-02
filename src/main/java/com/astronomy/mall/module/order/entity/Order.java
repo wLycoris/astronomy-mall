@@ -43,6 +43,12 @@ public class Order {
     private String remark;
     private String cancelReason;
 
+    // ========== 🆕 物流相关字段(后台订单管理) ==========
+    private String logisticsCompany;    // 物流公司
+    private String trackingNumber;      // 物流单号
+    private Integer logisticsStatus;    // 物流状态(0-未发货 1-运输中 2-派送中 3-已签收)
+    private String adminRemark;         // 管理员备注
+
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;
 
