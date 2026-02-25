@@ -6,6 +6,7 @@ import com.astronomy.mall.common.exception.BusinessException;
 import com.astronomy.mall.module.cart.entity.Cart;
 import com.astronomy.mall.module.cart.mapper.CartMapper;
 import com.astronomy.mall.module.cart.vo.CartVO;
+import com.astronomy.mall.module.notification.helper.NotificationHelper;
 import com.astronomy.mall.module.order.dto.CreateOrderDTO;
 import com.astronomy.mall.module.order.entity.Order;
 import com.astronomy.mall.module.order.entity.OrderItem;
@@ -19,6 +20,7 @@ import com.astronomy.mall.module.product.mapper.ProductMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -37,6 +39,10 @@ public class OrderServiceImpl implements OrderService {
     private final OrderItemMapper orderItemMapper;
     private final CartMapper cartMapper;
     private final ProductMapper productMapper;
+
+    // 🔥 新增：注入通知助手（注意用@Autowired，不要用final）
+    @Autowired
+    private NotificationHelper notificationHelper;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -208,6 +214,13 @@ public class OrderServiceImpl implements OrderService {
         order.setCancelTime(LocalDateTime.now());
         order.setCancelReason(reason);
         orderMapper.updateById(order);
+
+        // 🔥 新增：发送取消通知
+        notificationHelper.sendOrderCancelledNotification(
+                order.getUserId(),
+                order.getOrderNo(),
+                order.getId()
+        );
     }
 
     /**
@@ -231,6 +244,13 @@ public class OrderServiceImpl implements OrderService {
         order.setFinishTime(LocalDateTime.now());
         order.setLogisticsStatus(3); // 🆕 同时更新物流状态为已签收
         orderMapper.updateById(order);
+
+        // 🔥 新增：发送完成通知
+        notificationHelper.sendOrderCompletedNotification(
+                order.getUserId(),
+                order.getOrderNo(),
+                order.getId()
+        );
     }
 
     @Override

@@ -17,9 +17,14 @@ public class UserContext {
 
     /**
      * 获取当前用户ID
+     * 🔥 添加非空检查，防止未登录时返回null
      */
     public static Long getUserId() {
-        return USER_ID_HOLDER.get();
+        Long userId = USER_ID_HOLDER.get();
+        if (userId == null) {
+            throw new RuntimeException("用户未登录");
+        }
+        return userId;
     }
 
     /**

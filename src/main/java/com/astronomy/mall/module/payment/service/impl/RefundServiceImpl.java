@@ -4,6 +4,7 @@ import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.date.DateUtil;
 import com.astronomy.mall.common.exception.BusinessException;
 import com.astronomy.mall.common.result.ResultCode;
+import com.astronomy.mall.module.notification.helper.NotificationHelper;
 import com.astronomy.mall.module.order.entity.Order;
 import com.astronomy.mall.module.order.mapper.OrderMapper;
 import com.astronomy.mall.module.payment.dto.ApplyRefundDTO;
@@ -36,6 +37,10 @@ public class RefundServiceImpl implements RefundService {
 
     @Autowired
     private OrderMapper orderMapper;
+
+    // 🔥 新增：注入通知助手
+    @Autowired
+    private NotificationHelper notificationHelper;
 
     @Override
     @Transactional(rollbackFor = Exception.class)

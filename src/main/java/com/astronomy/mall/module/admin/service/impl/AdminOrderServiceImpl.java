@@ -10,6 +10,7 @@ import com.astronomy.mall.module.admin.dto.*;
 import com.astronomy.mall.module.admin.service.AdminOrderService;
 import com.astronomy.mall.module.admin.vo.AdminOrderVO;
 import com.astronomy.mall.module.admin.vo.OrderExportVO;
+import com.astronomy.mall.module.notification.helper.NotificationHelper;
 import com.astronomy.mall.module.order.entity.Order;
 import com.astronomy.mall.module.order.entity.OrderItem;
 import com.astronomy.mall.module.order.mapper.OrderItemMapper;
@@ -65,6 +66,10 @@ public class AdminOrderServiceImpl implements AdminOrderService {
 
     @Autowired
     private PaymentMapper paymentMapper;
+
+    // 🔥 新增：注入通知助手
+    @Autowired
+    private NotificationHelper notificationHelper;
 
     /**
      * 订单状态映射
@@ -259,6 +264,15 @@ public class AdminOrderServiceImpl implements AdminOrderService {
         }
 
         log.info("订单发货成功, 订单号: {}", order.getOrderNo());
+
+        // 🔥 新增：发送发货通知
+        notificationHelper.sendOrderShippedNotification(
+                order.getUserId(),
+                order.getOrderNo(),
+                dto.getLogisticsCompany(),
+                dto.getTrackingNumber(),
+                order.getId()
+        );
     }
 
     @Override
@@ -308,6 +322,13 @@ public class AdminOrderServiceImpl implements AdminOrderService {
         rollbackStock(order.getId());
 
         log.info("订单取消成功, 订单号: {}", order.getOrderNo());
+
+        // 🔥 新增：发送取消通知
+        notificationHelper.sendOrderCancelledNotification(
+                order.getUserId(),
+                order.getOrderNo(),
+                order.getId()
+        );
     }
 
     @Override
@@ -372,6 +393,13 @@ public class AdminOrderServiceImpl implements AdminOrderService {
         }
 
         log.info("订单派送成功, 订单号: {}, 物流状态: 运输中 → 派送中", order.getOrderNo());
+
+        // 🔥 新增：发送派送通知
+        notificationHelper.sendOrderDeliveringNotification(
+                order.getUserId(),
+                order.getTrackingNumber(),
+                order.getId()
+        );
     }
 
     @Override

@@ -4,6 +4,7 @@ import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.date.DateUtil;
 import com.astronomy.mall.common.exception.BusinessException;
 import com.astronomy.mall.common.result.ResultCode;
+import com.astronomy.mall.module.notification.helper.NotificationHelper;
 import com.astronomy.mall.module.order.entity.Order;
 import com.astronomy.mall.module.order.mapper.OrderMapper;
 import com.astronomy.mall.module.payment.dto.*;
@@ -31,6 +32,10 @@ public class PaymentServiceImpl implements PaymentService {
 
     @Autowired
     private OrderMapper orderMapper;
+
+    // 🔥 新增：注入通知助手
+    @Autowired
+    private NotificationHelper notificationHelper;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -107,7 +112,7 @@ public class PaymentServiceImpl implements PaymentService {
         // 4. 更新支付状态
         payment.setStatus(1); // 支付成功
         payment.setPaymentTime(LocalDateTime.now());
-        payment.setTransactionId("MOCK_" + System.currentTimeMillis()); // 模拟第三方流水号
+        payment.setTransactionId("MOCK_" + System.currentTimeMillis());
         paymentMapper.updateById(payment);
 
         // 5. 更新订单状态
@@ -119,6 +124,16 @@ public class PaymentServiceImpl implements PaymentService {
         }
 
         log.info("模拟支付成功: paymentNo={}, orderId={}", payment.getPaymentNo(), payment.getOrderId());
+
+        // 🔥 6. 发送支付成功通知
+        if (order != null) {
+            notificationHelper.sendOrderPaidNotification(
+                    order.getUserId(),
+                    order.getOrderNo(),
+                    order.getPaymentAmount().toString(),
+                    order.getId()
+            );
+        }
     }
 
     @Override
