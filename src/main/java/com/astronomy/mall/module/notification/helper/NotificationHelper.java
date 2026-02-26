@@ -162,7 +162,7 @@ public class NotificationHelper {
      * 发送退款审核通过通知
      */
     @Async
-    public void sendRefundApprovedNotification(Long userId, String amount, Long refundId) {
+    public void sendRefundApprovedNotification(Long userId, String amount, Long refundId, Long orderId) {
         Map<String, Object> variables = new HashMap<>();
         variables.put("amount", amount);
         variables.put("refundId", refundId);
@@ -171,9 +171,9 @@ public class NotificationHelper {
                 .userId(userId)
                 .module("mall")
                 .type("refund_approved")
-                .relatedId(refundId)
-                .relatedType("refund")
-                .priority(1)  // 重要
+                .relatedId(orderId)       // ← 改为 orderId
+                .relatedType("order")     // ← 改为 order
+                .priority(1)
                 .variables(variables)
                 .build();
 
@@ -188,7 +188,7 @@ public class NotificationHelper {
      * 发送退款审核拒绝通知
      */
     @Async
-    public void sendRefundRejectedNotification(Long userId, String reason, Long refundId) {
+    public void sendRefundRejectedNotification(Long userId, String reason, Long refundId, Long orderId) {
         Map<String, Object> variables = new HashMap<>();
         variables.put("reason", reason);
         variables.put("refundId", refundId);
@@ -197,9 +197,9 @@ public class NotificationHelper {
                 .userId(userId)
                 .module("mall")
                 .type("refund_rejected")
-                .relatedId(refundId)
-                .relatedType("refund")
-                .priority(1)  // 重要
+                .relatedId(orderId)       // ← 改为 orderId
+                .relatedType("order")     // ← 改为 order
+                .priority(1)
                 .variables(variables)
                 .build();
 
@@ -214,7 +214,7 @@ public class NotificationHelper {
      * 发送退款到账通知
      */
     @Async
-    public void sendRefundCompletedNotification(Long userId, String amount, Long refundId) {
+    public void sendRefundCompletedNotification(Long userId, String amount, Long refundId, Long orderId) {
         Map<String, Object> variables = new HashMap<>();
         variables.put("amount", amount);
         variables.put("refundId", refundId);
@@ -223,9 +223,9 @@ public class NotificationHelper {
                 .userId(userId)
                 .module("mall")
                 .type("refund_completed")
-                .relatedId(refundId)
-                .relatedType("refund")
-                .priority(1)  // 重要
+                .relatedId(orderId)       // ← 改为 orderId
+                .relatedType("order")     // ← 改为 order
+                .priority(1)
                 .variables(variables)
                 .build();
 
@@ -235,6 +235,7 @@ public class NotificationHelper {
             log.error("发送退款到账通知失败", e);
         }
     }
+
 
     /**
      * 发送商品上架通知
