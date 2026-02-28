@@ -333,6 +333,18 @@ public class ReviewController {
         return Result.success();
     }
 
+    @PutMapping("/{reviewId}")
+    @ApiOperation("修改评价")
+    public Result<Void> updateReview(
+            HttpServletRequest request,
+            @PathVariable Long reviewId,
+            @Valid @RequestBody PublishReviewDTO dto) {
+        Long userId = getUserIdFromRequest(request);
+        if (userId == null) return Result.error(401, "未登录");
+        reviewService.updateReview(userId, reviewId, dto);
+        return Result.success();
+    }
+
     /**
      * 获取我的评价列表
      *
@@ -401,5 +413,29 @@ public class ReviewController {
 
         ReviewStatisticsVO statistics = reviewService.getReviewStatistics(productId);
         return Result.success(statistics);
+    }
+
+    // ============================================
+    // 举报评价
+    // ============================================
+
+    /**
+     * 举报评价
+     * - 请求方式: POST
+     * - 路径: /api/review/report/{reviewId}
+     * - 需要登录
+     * - Body: { "reason": "举报原因" }
+     * - 举报次数达到3次，评价自动转为待审核(status=2)，从商品页隐藏
+     */
+    @PostMapping("/report/{reviewId}")
+    @ApiOperation("举报评价")
+    public Result<Void> reportReview(
+            HttpServletRequest request,
+            @ApiParam("评价ID") @PathVariable Long reviewId,
+            @RequestParam(required = false, defaultValue = "") String reason) {
+        Long userId = getUserIdFromRequest(request);
+        if (userId == null) return Result.error(401, "未登录");
+        reviewService.reportReview(userId, reviewId, reason);
+        return Result.success();
     }
 }

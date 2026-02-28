@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.astronomy.mall.module.admin.mapper.AdminReviewMapper">
+
+    <!-- 结果映射 -->
+    <resultMap id="AdminReviewVOMap" type="com.astronomy.mall.module.admin.vo.AdminReviewVO">
+        <id     property="id"            column="id"/>
+        <result property="productId"     column="product_id"/>
+        <result property="productName"   column="product_name"/>
+        <result property="productImage"  column="product_image"/>
+        <result property="userId"        column="user_id"/>
+        <result property="userNickname"  column="user_nickname"/>
+        <result property="userAvatar"    column="user_avatar"/>
+        <result property="orderId"       column="order_id"/>
+        <result property="orderNo"       column="order_no"/>
+        <result property="rating"        column="rating"/>
+        <result property="content"       column="content"/>
+        <result property="images"        column="images"/>
+        <result property="isAnonymous"   column="is_anonymous"/>
+        <result property="likeCount"     column="like_count"/>
+        <result property="status"        column="status"/>
+        <result property="reply"         column="reply"/>
+        <result property="replyTime"     column="reply_time"/>
+        <result property="isTop"         column="is_top"/>
+        <result property="createTime"    column="create_time"/>
+    </resultMap>
+
+    <!-- 公共 SELECT 列 -->
+    <sql id="selectColumns">
+        r.id,
+        r.product_id,
+        p.product_name,
+        p.main_image  AS product_image,
+        r.user_id,
+        u.nickname    AS user_nickname,
+        u.avatar      AS user_avatar,
+        r.order_id,
+        o.order_no,
+        r.rating,
+        r.content,
+        r.images,
+        r.is_anonymous,
+        r.like_count,
+        r.status,
+        r.reply,
+        r.reply_time,
+        r.is_top,
+        r.create_time
+    </sql>
+
+    <!-- ============================================================ -->
+    <!-- 分页查询评价列表                                              -->
+    <!-- ============================================================ -->
+    <select id="selectReviewPage" resultMap="AdminReviewVOMap">
+        SELECT
+        <include refid="selectColumns"/>
+        FROM tb_review r
+        LEFT JOIN tb_product p ON r.product_id = p.id
+        LEFT JOIN tb_user    u ON r.user_id    = u.id
+        LEFT JOIN tb_order   o ON r.order_id   = o.id
+        WHERE r.deleted = 0
+        <!-- 按商品ID精确筛选 -->
+        <if test="dto.productId != null">
+            AND r.product_id = #{dto.productId}
+        </if>
+        <!-- 按商品名称模糊搜索（新增）-->
+        <if test="dto.productName != null and dto.productName != ''">
+            AND p.product_name LIKE CONCAT('%', #{dto.productName}, '%')
+        </if>
+        <!-- 按评分筛选 -->
+        <if test="dto.rating != null">
+            AND r.rating = #{dto.rating}
+        </if>
+        <!-- 按状态筛选 -->
+        <if test="dto.status != null">
+            AND r.status = #{dto.status}
+        </if>
+        <!-- 只看置顶：前端传 isTop=1 时过滤，传 0 或不传则不加条件 -->
+        <if test="dto.isTop != null and dto.isTop == 1">
+            AND r.is_top = 1
+        </if>
+        <!-- 关键词搜索（评价内容）-->
+        <if test="dto.keyword != null and dto.keyword != ''">
+            AND r.content LIKE CONCAT('%', #{dto.keyword}, '%')
+        </if>
+        <!-- 时间范围 -->
+        <if test="dto.startTime != null and dto.startTime != ''">
+            AND r.create_time >= #{dto.startTime}
+        </if>
+        <if test="dto.endTime != null and dto.endTime != ''">
+            AND r.create_time &lt;= #{dto.endTime}
+        </if>
+        ORDER BY r.is_top DESC, r.create_time DESC
+    </select>
+
+    <!-- ============================================================ -->
+    <!-- 查询评价详情                                                  -->
+    <!-- ============================================================ -->
+    <select id="selectReviewDetail" resultMap="AdminReviewVOMap">
+        SELECT
+        <include refid="selectColumns"/>
+        FROM tb_review r
+        LEFT JOIN tb_product p ON r.product_id = p.id
+        LEFT JOIN tb_user    u ON r.user_id    = u.id
+        LEFT JOIN tb_order   o ON r.order_id   = o.id
+        WHERE r.id = #{id}
+        AND r.deleted = 0
+        LIMIT 1
+    </select>
+
+</mapper>

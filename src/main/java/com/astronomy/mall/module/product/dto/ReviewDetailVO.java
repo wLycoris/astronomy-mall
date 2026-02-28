@@ -82,6 +82,9 @@ public class ReviewDetailVO {
     @ApiModelProperty(value = "评价状态", notes = "0=已删除,1=正常,2=待审核")
     private Integer status;
 
+    @ApiModelProperty("是否置顶(0-否 1-是)")
+    private Integer isTop;
+
     @ApiModelProperty("创建时间")
     private String createTime;
 }

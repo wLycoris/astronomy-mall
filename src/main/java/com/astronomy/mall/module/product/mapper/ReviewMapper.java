@@ -6,16 +6,12 @@ import org.apache.ibatis.annotations.*;
 import java.util.List;
 import java.util.Map;
 
-/**
- * 评价Mapper接口(修复版)
- *
- * ✅ 核心修复:
- * 1. checkOrderReviewed 改名为 checkProductReviewed
- * 2. 新增 productId 参数
- * 3. 检查条件改为: 订单ID + 商品ID + 用户ID
- */
 @Mapper
 public interface ReviewMapper extends BaseMapper<Review> {
+
+    // ============================================
+    // 评价统计
+    // ============================================
 
     @Select({
             "<script>",
@@ -36,12 +32,17 @@ public interface ReviewMapper extends BaseMapper<Review> {
     })
     Map<String, Object> getReviewStatistics(@Param("productId") Long productId);
 
+    // ============================================
+    // 商品详情页评价列表（高级版，支持筛选+排序）
+    // ============================================
+
     @Select({
             "<script>",
             "SELECT ",
             "  r.id, r.user_id, r.product_id, r.order_id, r.rating, r.content, ",
             "  r.images, r.like_count, r.reply, r.reply_time, r.is_anonymous, ",
             "  r.status, r.create_time, r.update_time,",
+            "  r.is_top, r.top_time, ",
             "  u.username, u.nickname, u.avatar,",
             "  p.product_name AS productName, p.main_image AS productImage ",
             "FROM tb_review r ",
@@ -53,10 +54,10 @@ public interface ReviewMapper extends BaseMapper<Review> {
             "  AND r.images IS NOT NULL AND r.images != '' ",
             "</if>",
             "<choose>",
-            "  <when test='sortType == 2'>ORDER BY r.like_count DESC, r.create_time DESC</when>",
-            "  <when test='sortType == 3'>ORDER BY r.rating DESC, r.create_time DESC</when>",
-            "  <when test='sortType == 4'>ORDER BY r.rating ASC, r.create_time DESC</when>",
-            "  <otherwise>ORDER BY r.create_time DESC</otherwise>",
+            "  <when test='sortType == 2'>ORDER BY r.is_top DESC, r.top_time DESC, r.like_count DESC, r.create_time DESC</when>",
+            "  <when test='sortType == 3'>ORDER BY r.is_top DESC, r.top_time DESC, r.rating DESC, r.create_time DESC</when>",
+            "  <when test='sortType == 4'>ORDER BY r.is_top DESC, r.top_time DESC, r.rating ASC, r.create_time DESC</when>",
+            "  <otherwise>ORDER BY r.is_top DESC, r.top_time DESC, r.create_time DESC</otherwise>",
             "</choose> ",
             "LIMIT #{offset}, #{pageSize}",
             "</script>"
@@ -86,35 +87,27 @@ public interface ReviewMapper extends BaseMapper<Review> {
             @Param("hasImages") Integer hasImages
     );
 
-    /**
-     * ✅ 核心修复: 检查指定商品是否已评价
-     *
-     * 旧方法名: checkOrderReviewed (只检查订单)
-     * 新方法名: checkProductReviewed (检查订单+商品)
-     *
-     * 修复逻辑:
-     * - 旧: WHERE order_id = #{orderId} AND user_id = #{userId}
-     * - 新: WHERE order_id = #{orderId} AND product_id = #{productId} AND user_id = #{userId}
-     *
-     * 使用场景:
-     * - 发布评价前检查该商品是否已评价
-     * - 允许同一订单的不同商品分别评价
-     *
-     * @param orderId 订单ID
-     * @param productId 商品ID (新增参数)
-     * @param userId 用户ID
-     * @return 评价数量(0=未评价, >0=已评价)
-     */
+    // ============================================
+    // 发布评价前：检查是否已评价过该商品
+    // deleted=0：用户自己删了可以重发
+    // status=0：被管理员删了也不能重发
+    // 两个条件都要检查
+    // ============================================
+
     @Select("SELECT COUNT(*) FROM tb_review " +
             "WHERE order_id = #{orderId} " +
             "AND product_id = #{productId} " +
             "AND user_id = #{userId} " +
-            "AND deleted = 0")
+            "AND (deleted = 0 OR status = 0)")
     Integer checkProductReviewed(
             @Param("orderId") Long orderId,
             @Param("productId") Long productId,
             @Param("userId") Long userId
     );
+
+    // ============================================
+    // 点赞
+    // ============================================
 
     @Update("UPDATE tb_review SET like_count = like_count + 1 WHERE id = #{reviewId}")
     int increaseLikeCount(@Param("reviewId") Long reviewId);
@@ -122,6 +115,12 @@ public interface ReviewMapper extends BaseMapper<Review> {
     @Update("UPDATE tb_review SET like_count = like_count - 1 " +
             "WHERE id = #{reviewId} AND like_count > 0")
     int decreaseLikeCount(@Param("reviewId") Long reviewId);
+
+    // ============================================
+    // 我的评价列表
+    // deleted=0：只查未被用户自己删除的（@TableLogic管不到手写SQL，手动加）
+    // status 不过滤：status=0(管理员删除) 也要展示，前端显示"已被删除"提示
+    // ============================================
 
     @Select({
             "<script>",
@@ -136,6 +135,7 @@ public interface ReviewMapper extends BaseMapper<Review> {
             "  r.reply, ",
             "  r.reply_time, ",
             "  r.create_time, ",
+            "  r.status, ",
             "  p.product_name AS productName, ",
             "  p.main_image AS productImage, ",
             "  p.price AS productPrice ",
@@ -154,4 +154,29 @@ public interface ReviewMapper extends BaseMapper<Review> {
 
     @Select("SELECT COUNT(*) FROM tb_review WHERE user_id = #{userId} AND deleted = 0")
     Integer getUserReviewCount(@Param("userId") Long userId);
+
+    // ============================================
+    // 举报功能
+    // ============================================
+
+    @Select("SELECT COUNT(*) FROM tb_review_report " +
+            "WHERE review_id = #{reviewId} AND user_id = #{userId}")
+    Integer checkUserReported(
+            @Param("reviewId") Long reviewId,
+            @Param("userId") Long userId
+    );
+
+    @Insert("INSERT INTO tb_review_report(review_id, user_id, reason, create_time) " +
+            "VALUES(#{reviewId}, #{userId}, #{reason}, NOW())")
+    int insertReport(
+            @Param("reviewId") Long reviewId,
+            @Param("userId") Long userId,
+            @Param("reason") String reason
+    );
+
+    @Update("UPDATE tb_review " +
+            "SET report_count = report_count + 1, " +
+            "    status = CASE WHEN report_count + 1 >= 3 AND status = 1 THEN 2 ELSE status END " +
+            "WHERE id = #{reviewId}")
+    int incrementReportCount(@Param("reviewId") Long reviewId);
 }

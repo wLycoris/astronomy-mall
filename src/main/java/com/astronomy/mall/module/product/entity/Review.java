@@ -93,6 +93,11 @@ public class Review {
     private LocalDateTime replyTime;
 
     /**
+     * 举报次数，达到阈值(3次)时 status 自动转为 2(待审核)
+     */
+    private Integer reportCount;
+
+    /**
      * 创建时间 - 评价发布时间
      */
     @TableField(fill = FieldFill.INSERT)

@@ -6,24 +6,6 @@ import lombok.Data;
 import javax.validation.constraints.*;
 import java.util.List;
 
-// ==========================================
-// 原有VO(保留兼容性)
-// ==========================================
-
-/**
- * 评价VO(基础版)
- *
- * 使用场景:
- * 1. 基础版评价列表
- * 2. 我的评价列表
- *
- * 特点:
- * - 保留原有字段结构
- * - 兼容现有前端代码
- *
- * @author 天文商城开发团队
- * @since 2025-11-14
- */
 @Data
 @ApiModel(description = "评价VO")
 public class ReviewVO {
@@ -78,4 +60,12 @@ public class ReviewVO {
 
     @ApiModelProperty("创建时间")
     private String createTime;
+
+    /**
+     * 评价状态: 0-已被管理员删除 1-正常 2-待审核
+     * 用途: 我的评价页面根据 status=0 显示"该评价已被管理员删除"
+     * 注意: 不再用 deleted 判断，管理员删除只设 status=0，不动 deleted 字段
+     */
+    @ApiModelProperty("评价状态(0-已被管理员删除 1-正常 2-待审核)")
+    private Integer status;
 }
