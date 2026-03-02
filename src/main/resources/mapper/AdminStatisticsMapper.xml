@@ -1,0 +1,312 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.astronomy.mall.module.admin.mapper.AdminStatisticsMapper">
+
+    <!-- ===================== 数据概览 ===================== -->
+
+    <!-- 今日订单数 (所有今日创建的订单，不含已取消) -->
+    <select id="getTodayOrderCount" resultType="java.lang.Integer">
+        SELECT COUNT(*)
+        FROM tb_order
+        WHERE DATE(create_time) = CURDATE()
+          AND status != 4
+          AND deleted = 0
+    </select>
+
+    <!-- 今日销售额 (今日支付成功的订单, status=1已支付) -->
+    <select id="getTodaySalesAmount" resultType="java.math.BigDecimal">
+        SELECT IFNULL(SUM(payment_amount), 0)
+        FROM tb_order
+        WHERE DATE(payment_time) = CURDATE()
+          AND status != 4
+          AND deleted = 0
+    </select>
+
+    <!-- 昨日订单数 -->
+    <select id="getYesterdayOrderCount" resultType="java.lang.Integer">
+        SELECT COUNT(*)
+        FROM tb_order
+        WHERE DATE(create_time) = DATE_SUB(CURDATE(), INTERVAL 1 DAY)
+          AND status != 4
+          AND deleted = 0
+    </select>
+
+    <!-- 昨日销售额 -->
+    <select id="getYesterdaySalesAmount" resultType="java.math.BigDecimal">
+        SELECT IFNULL(SUM(payment_amount), 0)
+        FROM tb_order
+        WHERE DATE(payment_time) = DATE_SUB(CURDATE(), INTERVAL 1 DAY)
+          AND status != 4
+          AND deleted = 0
+    </select>
+
+    <!-- 本月订单数 -->
+    <select id="getMonthOrderCount" resultType="java.lang.Integer">
+        SELECT COUNT(*)
+        FROM tb_order
+        WHERE YEAR(create_time) = YEAR(NOW())
+          AND MONTH(create_time) = MONTH(NOW())
+          AND status != 4
+          AND deleted = 0
+    </select>
+
+    <!-- 本月销售额 -->
+    <select id="getMonthSalesAmount" resultType="java.math.BigDecimal">
+        SELECT IFNULL(SUM(payment_amount), 0)
+        FROM tb_order
+        WHERE YEAR(payment_time) = YEAR(NOW())
+          AND MONTH(payment_time) = MONTH(NOW())
+          AND status != 4
+          AND deleted = 0
+    </select>
+
+    <!-- 上月销售额 -->
+    <select id="getLastMonthSalesAmount" resultType="java.math.BigDecimal">
+        SELECT IFNULL(SUM(payment_amount), 0)
+        FROM tb_order
+        WHERE YEAR(payment_time) = YEAR(DATE_SUB(NOW(), INTERVAL 1 MONTH))
+          AND MONTH(payment_time) = MONTH(DATE_SUB(NOW(), INTERVAL 1 MONTH))
+          AND status != 4
+          AND deleted = 0
+    </select>
+
+    <!-- 待处理订单数 (status=1 待发货) -->
+    <select id="getPendingOrderCount" resultType="java.lang.Integer">
+        SELECT COUNT(*)
+        FROM tb_order
+        WHERE status = 1
+          AND deleted = 0
+    </select>
+
+    <!-- 待审核退款数 -->
+    <select id="getPendingRefundCount" resultType="java.lang.Integer">
+        SELECT COUNT(*)
+        FROM tb_refund
+        WHERE status = 0
+    </select>
+
+    <!-- 库存预警数 (stock <= 10, 上架商品) -->
+    <select id="getStockWarningCount" resultType="java.lang.Integer">
+        SELECT COUNT(*)
+        FROM tb_product
+        WHERE stock &lt;= 10
+          AND status = 1
+          AND deleted = 0
+    </select>
+
+    <!-- ===================== 销售趋势 ===================== -->
+
+    <!-- 最近N天每日销售数据（连续日期序列，无订单日期显示0） -->
+    <select id="getSalesTrend" resultType="java.util.Map">
+        SELECT
+            DATE_FORMAT(date_series.date, '%Y-%m-%d') AS `date`,
+            IFNULL(COUNT(DISTINCT o.id), 0)           AS order_count,
+            IFNULL(SUM(o.payment_amount), 0)          AS sales_amount
+        FROM (
+                 SELECT DATE_SUB(CURDATE(), INTERVAL seq.n DAY) AS `date`
+                 FROM (
+                          SELECT 0  AS n UNION SELECT 1  UNION SELECT 2  UNION SELECT 3  UNION SELECT 4
+                          UNION SELECT 5  UNION SELECT 6  UNION SELECT 7  UNION SELECT 8  UNION SELECT 9
+                          UNION SELECT 10 UNION SELECT 11 UNION SELECT 12 UNION SELECT 13 UNION SELECT 14
+                          UNION SELECT 15 UNION SELECT 16 UNION SELECT 17 UNION SELECT 18 UNION SELECT 19
+                          UNION SELECT 20 UNION SELECT 21 UNION SELECT 22 UNION SELECT 23 UNION SELECT 24
+                          UNION SELECT 25 UNION SELECT 26 UNION SELECT 27 UNION SELECT 28 UNION SELECT 29
+                      ) seq
+                 WHERE seq.n &lt; #{days}
+             ) date_series
+                 LEFT JOIN tb_order o
+                           ON DATE(o.create_time) = date_series.date
+            AND o.status != 4
+            AND o.deleted = 0
+        GROUP BY date_series.date
+        ORDER BY date_series.date ASC
+    </select>
+
+    <!-- 商品销售排行 Top 10 -->
+    <select id="getProductRank" resultType="java.util.Map">
+        SELECT
+            oi.product_id    AS product_id,
+            oi.product_name  AS product_name,
+            oi.product_image AS product_image,
+            SUM(oi.quantity) AS sales_count,
+            SUM(oi.total_price) AS sales_amount
+        FROM tb_order_item oi
+                 INNER JOIN tb_order o ON oi.order_id = o.id
+        WHERE o.status != 4
+          AND o.deleted = 0
+          AND o.create_time >= DATE_SUB(NOW(), INTERVAL #{days} DAY)
+        GROUP BY oi.product_id, oi.product_name, oi.product_image
+        ORDER BY sales_count DESC
+            LIMIT 10
+    </select>
+
+    <!-- 分类销售占比 -->
+    <select id="getCategorySales" resultType="java.util.Map">
+        SELECT
+            p.category_id    AS category_id,
+            c.category_name  AS category_name,
+            SUM(oi.quantity) AS sales_count,
+            SUM(oi.total_price) AS sales_amount
+        FROM tb_order_item oi
+                 INNER JOIN tb_order    o ON oi.order_id  = o.id
+                 INNER JOIN tb_product  p ON oi.product_id = p.id
+                 INNER JOIN tb_category c ON p.category_id = c.id
+        WHERE o.status != 4
+          AND o.deleted = 0
+          AND o.create_time >= DATE_SUB(NOW(), INTERVAL #{days} DAY)
+        GROUP BY p.category_id, c.category_name
+        ORDER BY sales_amount DESC
+    </select>
+
+    <!-- ===================== 订单统计 ===================== -->
+
+    <!-- 订单状态分布 -->
+    <select id="getOrderStatusDistribution" resultType="java.util.Map">
+        SELECT
+            status,
+            COUNT(*) AS cnt
+        FROM tb_order
+        WHERE deleted = 0
+        GROUP BY status
+        ORDER BY status
+    </select>
+
+    <!-- 订单金额分布 -->
+    <select id="getOrderAmountDistribution" resultType="java.util.Map">
+        SELECT
+            CASE
+                WHEN payment_amount &lt; 100  THEN '0-100元'
+                WHEN payment_amount &lt; 500  THEN '100-500元'
+                WHEN payment_amount &lt; 1000 THEN '500-1000元'
+                WHEN payment_amount &lt; 3000 THEN '1000-3000元'
+                WHEN payment_amount &lt; 5000 THEN '3000-5000元'
+                ELSE '5000元以上'
+                END AS label,
+            COUNT(*) AS cnt
+        FROM tb_order
+        WHERE status != 4
+          AND deleted = 0
+        GROUP BY label
+        ORDER BY MIN(payment_amount)
+    </select>
+
+    <!-- ===================== 用户统计 ===================== -->
+
+    <!-- 最近N天新增用户趋势 -->
+    <select id="getUserTrend" resultType="java.util.Map">
+        SELECT
+            DATE_FORMAT(date_series.date, '%Y-%m-%d') AS `date`,
+            IFNULL(COUNT(u.id), 0) AS new_user_count
+        FROM (
+                 SELECT DATE_SUB(CURDATE(), INTERVAL seq.n DAY) AS `date`
+                 FROM (
+                          SELECT 0  AS n UNION SELECT 1  UNION SELECT 2  UNION SELECT 3  UNION SELECT 4
+                          UNION SELECT 5  UNION SELECT 6  UNION SELECT 7  UNION SELECT 8  UNION SELECT 9
+                          UNION SELECT 10 UNION SELECT 11 UNION SELECT 12 UNION SELECT 13 UNION SELECT 14
+                          UNION SELECT 15 UNION SELECT 16 UNION SELECT 17 UNION SELECT 18 UNION SELECT 19
+                          UNION SELECT 20 UNION SELECT 21 UNION SELECT 22 UNION SELECT 23 UNION SELECT 24
+                          UNION SELECT 25 UNION SELECT 26 UNION SELECT 27 UNION SELECT 28 UNION SELECT 29
+                      ) seq
+                 WHERE seq.n &lt; #{days}
+             ) date_series
+                 LEFT JOIN tb_user u
+                           ON DATE(u.create_time) = date_series.date
+            AND u.deleted = 0
+        GROUP BY date_series.date
+        ORDER BY date_series.date ASC
+    </select>
+
+    <!-- 近30天有登录记录的活跃用户数 -->
+    <select id="getActiveUserCount" resultType="java.lang.Integer">
+        SELECT COUNT(DISTINCT user_id)
+        FROM tb_login_log
+        WHERE login_time >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+    </select>
+
+    <!-- 总用户数 -->
+    <select id="getTotalUserCount" resultType="java.lang.Integer">
+        SELECT COUNT(*)
+        FROM tb_user
+        WHERE deleted = 0
+    </select>
+
+    <!-- 省份分布 Top 10 -->
+    <select id="getProvinceDistribution" resultType="java.util.Map">
+        SELECT
+            IFNULL(province, '未知') AS province,
+            COUNT(*) AS user_count
+        FROM tb_user
+        WHERE deleted = 0
+        GROUP BY province
+        ORDER BY user_count DESC
+            LIMIT 10
+    </select>
+
+    <!-- 用户等级分布 -->
+    <select id="getLevelDistribution" resultType="java.util.Map">
+        SELECT
+            CAST(observation_level AS UNSIGNED) AS level_val,
+            COUNT(*) AS user_count
+        FROM tb_user
+        WHERE deleted = 0
+        GROUP BY observation_level
+        ORDER BY observation_level
+    </select>
+
+    <!-- ===================== 评价统计 ===================== -->
+
+    <!-- 评分分布 -->
+    <select id="getRatingDistribution" resultType="java.util.Map">
+        SELECT
+            rating,
+            COUNT(*) AS cnt
+        FROM tb_review
+        WHERE deleted = 0
+          AND status = 1
+        GROUP BY rating
+        ORDER BY rating DESC
+    </select>
+
+    <!-- 总评价数 -->
+    <select id="getTotalReviewCount" resultType="java.lang.Integer">
+        SELECT COUNT(*)
+        FROM tb_review
+        WHERE deleted = 0
+          AND status = 1
+    </select>
+
+    <!-- 平均评分 -->
+    <select id="getAvgRating" resultType="java.lang.Double">
+        SELECT IFNULL(AVG(rating), 0)
+        FROM tb_review
+        WHERE deleted = 0
+          AND status = 1
+    </select>
+
+    <!-- 最近N天新增评价趋势 -->
+    <select id="getReviewTrend" resultType="java.util.Map">
+        SELECT
+            DATE_FORMAT(date_series.date, '%Y-%m-%d') AS `date`,
+            IFNULL(COUNT(r.id), 0) AS review_count
+        FROM (
+                 SELECT DATE_SUB(CURDATE(), INTERVAL seq.n DAY) AS `date`
+                 FROM (
+                          SELECT 0  AS n UNION SELECT 1  UNION SELECT 2  UNION SELECT 3  UNION SELECT 4
+                          UNION SELECT 5  UNION SELECT 6  UNION SELECT 7  UNION SELECT 8  UNION SELECT 9
+                          UNION SELECT 10 UNION SELECT 11 UNION SELECT 12 UNION SELECT 13 UNION SELECT 14
+                          UNION SELECT 15 UNION SELECT 16 UNION SELECT 17 UNION SELECT 18 UNION SELECT 19
+                          UNION SELECT 20 UNION SELECT 21 UNION SELECT 22 UNION SELECT 23 UNION SELECT 24
+                          UNION SELECT 25 UNION SELECT 26 UNION SELECT 27 UNION SELECT 28 UNION SELECT 29
+                      ) seq
+                 WHERE seq.n &lt; #{days}
+             ) date_series
+                 LEFT JOIN tb_review r
+                           ON DATE(r.create_time) = date_series.date
+            AND r.deleted = 0
+            AND r.status = 1
+        GROUP BY date_series.date
+        ORDER BY date_series.date ASC
+    </select>
+
+</mapper>
