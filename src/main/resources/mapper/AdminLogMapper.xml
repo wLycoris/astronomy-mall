@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!--
+    管理员操作日志 Mapper XML
+    对应接口: com.astronomy.mall.module.admin.mapper.AdminLogMapper
+-->
+<mapper namespace="com.astronomy.mall.module.admin.mapper.AdminLogMapper">
+
+    <!-- =============================================
+         公共结果映射
+         ============================================= -->
+    <resultMap id="BaseResultMap" type="com.astronomy.mall.module.admin.entity.AdminLogEntity">
+        <id     column="id"             property="id"/>
+        <result column="admin_id"       property="adminId"/>
+        <result column="admin_name"     property="adminName"/>
+        <result column="operation"      property="operation"/>
+        <result column="method"         property="method"/>
+        <result column="params"         property="params"/>
+        <result column="ip_address"     property="ipAddress"/>
+        <result column="user_agent"     property="userAgent"/>
+        <result column="execution_time" property="executionTime"/>
+        <result column="status"         property="status"/>
+        <result column="error_msg"      property="errorMsg"/>
+        <result column="create_time"    property="createTime"/>
+    </resultMap>
+
+    <!-- =============================================
+         公共查询条件片段（列表 & 导出共用）
+         ============================================= -->
+    <sql id="whereCondition">
+        <where>
+            <!-- 按管理员ID精确筛选 -->
+            <if test="query.adminId != null">
+                AND admin_id = #{query.adminId}
+            </if>
+            <!-- 按管理员名称模糊搜索 -->
+            <if test="query.adminName != null and query.adminName != ''">
+                AND admin_name LIKE CONCAT('%', #{query.adminName}, '%')
+            </if>
+            <!-- 按操作类型模糊搜索 -->
+            <if test="query.operation != null and query.operation != ''">
+                AND operation LIKE CONCAT('%', #{query.operation}, '%')
+            </if>
+            <!-- 按操作状态筛选：0-失败 1-成功 -->
+            <if test="query.status != null">
+                AND status = #{query.status}
+            </if>
+            <!-- 开始时间（含当天00:00:00） -->
+            <if test="query.startTime != null and query.startTime != ''">
+                AND create_time &gt;= #{query.startTime}
+            </if>
+            <!-- 结束时间（含当天23:59:59，前端传 yyyy-MM-dd 时需追加 23:59:59，或在此处处理） -->
+            <if test="query.endTime != null and query.endTime != ''">
+                AND create_time &lt;= #{query.endTime}
+            </if>
+        </where>
+    </sql>
+
+    <!-- =============================================
+         分页查询
+         ============================================= -->
+    <select id="selectPageByCondition" resultMap="BaseResultMap">
+        SELECT
+        id,
+        admin_id,
+        admin_name,
+        operation,
+        method,
+        ip_address,
+        user_agent,
+        execution_time,
+        status,
+        error_msg,
+        create_time
+        /*
+        * 列表页不查 params（可能很大），详情接口单独查全字段
+        * 这样列表翻页更快
+        */
+        FROM tb_admin_log
+        <include refid="whereCondition"/>
+        ORDER BY create_time DESC
+    </select>
+
+    <!-- =============================================
+         导出查询（不分页，返回全字段，最多10000条）
+         ============================================= -->
+    <select id="selectListForExport" resultMap="BaseResultMap">
+        SELECT
+        id,
+        admin_id,
+        admin_name,
+        operation,
+        method,
+        params,
+        ip_address,
+        user_agent,
+        execution_time,
+        status,
+        error_msg,
+        create_time
+        FROM tb_admin_log
+        <include refid="whereCondition"/>
+        ORDER BY create_time DESC
+        LIMIT 10000
+    </select>
+
+</mapper>
