@@ -17,6 +17,8 @@ import com.astronomy.mall.module.order.vo.OrderItemVO;
 import com.astronomy.mall.module.order.vo.OrderVO;
 import com.astronomy.mall.module.product.entity.Product;
 import com.astronomy.mall.module.product.mapper.ProductMapper;
+import com.astronomy.mall.module.admin.entity.SystemSetting;
+import com.astronomy.mall.module.admin.mapper.SystemSettingMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
@@ -28,7 +30,9 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
@@ -39,8 +43,8 @@ public class OrderServiceImpl implements OrderService {
     private final OrderItemMapper orderItemMapper;
     private final CartMapper cartMapper;
     private final ProductMapper productMapper;
+    private final SystemSettingMapper systemSettingMapper;  // 🆕 运费设置
 
-    // 🔥 新增：注入通知助手（注意用@Autowired，不要用final）
     @Autowired
     private NotificationHelper notificationHelper;
 
@@ -61,7 +65,7 @@ public class OrderServiceImpl implements OrderService {
                     .collect(Collectors.toList());
         }
 
-        // 3. 检查库存并计算总金额
+        // 3. 检查库存并计算商品总金额
         BigDecimal totalAmount = BigDecimal.ZERO;
         for (CartVO cartItem : cartItems) {
             Product product = productMapper.selectById(cartItem.getProductId());
@@ -71,14 +75,15 @@ public class OrderServiceImpl implements OrderService {
             if (product.getStock() < cartItem.getQuantity()) {
                 throw new BusinessException(2002, "商品[" + product.getProductName() + "]库存不足");
             }
-
-            // 计算小计
             BigDecimal subtotal = product.getPrice()
                     .multiply(BigDecimal.valueOf(cartItem.getQuantity()));
             totalAmount = totalAmount.add(subtotal);
         }
 
-        // 4. 创建订单
+        // 🆕 4. 从系统设置读取运费规则，动态计算运费
+        BigDecimal freight = calcFreight(totalAmount);
+
+        // 5. 创建订单
         Order order = new Order();
         order.setOrderNo(generateOrderNo());
         order.setUserId(userId);
@@ -93,9 +98,9 @@ public class OrderServiceImpl implements OrderService {
 
         // 价格信息
         order.setTotalAmount(totalAmount);
-        order.setFreight(BigDecimal.ZERO); // 暂时包邮
+        order.setFreight(freight);                                    // 🆕 动态运费
         order.setDiscountAmount(BigDecimal.ZERO);
-        order.setPaymentAmount(totalAmount);
+        order.setPaymentAmount(totalAmount.add(freight));             // 🆕 应付 = 商品总额 + 运费
 
         // 订单状态
         order.setStatus(0); // 待支付
@@ -103,7 +108,7 @@ public class OrderServiceImpl implements OrderService {
 
         orderMapper.insert(order);
 
-        // 5. 创建订单详情
+        // 6. 创建订单详情 + 扣减库存
         List<OrderItem> orderItems = new ArrayList<>();
         for (CartVO cartItem : cartItems) {
             Product product = productMapper.selectById(cartItem.getProductId());
@@ -111,14 +116,10 @@ public class OrderServiceImpl implements OrderService {
             OrderItem orderItem = new OrderItem();
             orderItem.setOrderId(order.getId());
             orderItem.setProductId(product.getId());
-
-            // 商品快照
             orderItem.setProductName(product.getProductName());
             orderItem.setProductImage(product.getMainImage());
             orderItem.setProductPrice(product.getPrice());
             orderItem.setProductBrand(product.getBrand());
-
-            // 购买信息
             orderItem.setQuantity(cartItem.getQuantity());
             BigDecimal totalPrice = product.getPrice()
                     .multiply(BigDecimal.valueOf(cartItem.getQuantity()));
@@ -132,7 +133,7 @@ public class OrderServiceImpl implements OrderService {
             productMapper.updateById(product);
         }
 
-        // 6. 删除购物车中的已购买商品
+        // 7. 删除购物车中的已购买商品
         List<Long> cartIds = cartItems.stream()
                 .map(CartVO::getId)
                 .collect(Collectors.toList());
@@ -142,8 +143,42 @@ public class OrderServiceImpl implements OrderService {
             cartMapper.delete(wrapper);
         }
 
-        // 7. 返回订单VO
+        // 8. 返回订单VO
         return convertToVO(order, orderItems);
+    }
+
+    /**
+     * 🆕 根据系统设置动态计算运费
+     *
+     * 规则：
+     *  1. defaultFreight == 0                          → 全场免运费
+     *  2. freeFreightEnabled && totalAmount >= freeFreightAmount → 满额包邮，运费 = 0
+     *  3. 其他情况                                     → 收取 defaultFreight
+     */
+    private BigDecimal calcFreight(BigDecimal totalAmount) {
+        try {
+            List<SystemSetting> settings = systemSettingMapper.selectByGroupName("freight");
+            Map<String, String> fs = new HashMap<>();
+            settings.forEach(s -> fs.put(s.getSettingKey(), s.getSettingValue()));
+
+            BigDecimal defaultFreight     = new BigDecimal(fs.getOrDefault("default_freight",      "0"));
+            boolean    freeFreightEnabled = Boolean.parseBoolean(fs.getOrDefault("free_freight_enabled", "false"));
+            BigDecimal freeFreightAmount  = new BigDecimal(fs.getOrDefault("free_freight_amount",   "0"));
+
+            // 全场免运费
+            if (defaultFreight.compareTo(BigDecimal.ZERO) == 0) {
+                return BigDecimal.ZERO;
+            }
+            // 满额包邮
+            if (freeFreightEnabled && totalAmount.compareTo(freeFreightAmount) >= 0) {
+                return BigDecimal.ZERO;
+            }
+            return defaultFreight;
+
+        } catch (Exception e) {
+            // 读取设置失败时兜底返回 0，不影响下单流程
+            return BigDecimal.ZERO;
+        }
     }
 
     @Override
@@ -158,7 +193,6 @@ public class OrderServiceImpl implements OrderService {
         Page<Order> page = new Page<>(pageNum, pageSize);
         Page<Order> orderPage = orderMapper.selectPage(page, wrapper);
 
-        // 转换为VO
         Page<OrderVO> voPage = new Page<>(pageNum, pageSize, orderPage.getTotal());
         List<OrderVO> voList = orderPage.getRecords().stream()
                 .map(this::convertToVO)
@@ -175,7 +209,6 @@ public class OrderServiceImpl implements OrderService {
             throw new BusinessException(3001, "订单不存在");
         }
 
-        // 查询订单详情
         LambdaQueryWrapper<OrderItem> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(OrderItem::getOrderId, orderId);
         List<OrderItem> orderItems = orderItemMapper.selectList(wrapper);
@@ -191,7 +224,6 @@ public class OrderServiceImpl implements OrderService {
             throw new BusinessException(3001, "订单不存在");
         }
 
-        // 只能取消待支付的订单
         if (order.getStatus() != 0) {
             throw new BusinessException(3002, "只能取消待支付的订单");
         }
@@ -209,13 +241,11 @@ public class OrderServiceImpl implements OrderService {
             }
         }
 
-        // 更新订单状态
-        order.setStatus(4); // 已取消
+        order.setStatus(4);
         order.setCancelTime(LocalDateTime.now());
         order.setCancelReason(reason);
         orderMapper.updateById(order);
 
-        // 🔥 新增：发送取消通知
         notificationHelper.sendOrderCancelledNotification(
                 order.getUserId(),
                 order.getOrderNo(),
@@ -223,10 +253,6 @@ public class OrderServiceImpl implements OrderService {
         );
     }
 
-    /**
-     * 确认收货
-     * 🆕 修改: 同时更新物流状态为已签收
-     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void confirmReceipt(Long userId, Long orderId) {
@@ -235,17 +261,15 @@ public class OrderServiceImpl implements OrderService {
             throw new BusinessException(3001, "订单不存在");
         }
 
-        // 只能确认待收货的订单
         if (order.getStatus() != 2) {
             throw new BusinessException(3003, "只能确认待收货的订单");
         }
 
-        order.setStatus(3); // 已完成
+        order.setStatus(3);
         order.setFinishTime(LocalDateTime.now());
-        order.setLogisticsStatus(3); // 🆕 同时更新物流状态为已签收
+        order.setLogisticsStatus(3);
         orderMapper.updateById(order);
 
-        // 🔥 新增：发送完成通知
         notificationHelper.sendOrderCompletedNotification(
                 order.getUserId(),
                 order.getOrderNo(),
@@ -261,7 +285,6 @@ public class OrderServiceImpl implements OrderService {
             throw new BusinessException(3001, "订单不存在");
         }
 
-        // 只能删除已取消或已完成的订单
         if (order.getStatus() != 3 && order.getStatus() != 4) {
             throw new BusinessException(3004, "只能删除已取消或已完成的订单");
         }
@@ -269,31 +292,22 @@ public class OrderServiceImpl implements OrderService {
         orderMapper.deleteById(orderId);
     }
 
-    /**
-     * 生成订单编号
-     */
     private String generateOrderNo() {
         String timestamp = DateUtil.format(LocalDateTime.now(), "yyyyMMddHHmmss");
         String randomNum = String.valueOf((int) (Math.random() * 10000));
         return "ORD" + timestamp + randomNum;
     }
 
-    /**
-     * 转换为VO
-     */
     private OrderVO convertToVO(Order order) {
         OrderVO vo = BeanUtil.copyProperties(order, OrderVO.class);
 
-        // 完整地址
         vo.setFullAddress(order.getReceiverProvince() + " " +
                 order.getReceiverCity() + " " +
                 order.getReceiverDistrict() + " " +
                 order.getReceiverAddress());
 
-        // 状态文本
         vo.setStatusText(getStatusText(order.getStatus()));
 
-        // 查询订单详情
         LambdaQueryWrapper<OrderItem> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(OrderItem::getOrderId, order.getId());
         List<OrderItem> orderItems = orderItemMapper.selectList(wrapper);
@@ -324,9 +338,6 @@ public class OrderServiceImpl implements OrderService {
         return vo;
     }
 
-    /**
-     * 获取订单状态文本
-     */
     private String getStatusText(Integer status) {
         switch (status) {
             case 0: return "待支付";

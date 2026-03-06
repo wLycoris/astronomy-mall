@@ -50,6 +50,11 @@ public class WebMvcConfig implements WebMvcConfigurer {
         // ============================================
         registry.addInterceptor(adminInterceptor)
                 .addPathPatterns("/api/admin/**") // 只拦截管理员接口
+                .excludePathPatterns(
+                        "/api/admin/setting/maintenance",  // 🆕
+                        "/api/admin/setting/register",     // 🆕
+                        "/api/admin/setting/payment"       // 🆕
+                )
                 .order(2); // 第二个执行
     }
 

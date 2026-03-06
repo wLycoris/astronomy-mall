@@ -3,6 +3,7 @@ package com.astronomy.mall;
 import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * 天文器材商城系统启动类
@@ -12,6 +13,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  */
 @SpringBootApplication
 @MapperScan("com.astronomy.mall.module.*.mapper")
+@EnableScheduling  // 🆕 开启定时任务
 public class AstronomyMallApplication {
 
     public static void main(String[] args) {

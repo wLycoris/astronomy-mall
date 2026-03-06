@@ -31,7 +31,10 @@ public class JwtInterceptor implements HandlerInterceptor {
             // 用户相关
             "/api/user/register",
             "/api/user/login",
-
+            // 🆕 系统设置公开查询（前台页面需要，无需登录）
+            "/api/admin/setting/maintenance",   // 维护模式（路由守卫用）
+            "/api/admin/setting/register",      // 注册开关（Register.vue用）
+            "/api/admin/setting/payment",       // 支付方式（PaymentPage.vue用）
             // 商品相关 (浏览商品不需要登录)
             "/api/category/tree",
             "/api/category/first-level",
