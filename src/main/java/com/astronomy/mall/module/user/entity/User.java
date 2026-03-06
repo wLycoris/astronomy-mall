@@ -76,4 +76,6 @@ public class User implements Serializable {
 
     /** 最后登录时间 */
     private LocalDateTime lastLoginTime;
+
+    private BigDecimal balance;
 }

@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!--
+  个人中心概览 Mapper XML
+  文件路径: src/main/resources/mapper/UserOverviewMapper.xml
+
+  📌 核心说明:
+    selectOrderStatusCount 用 CASE WHEN SUM 模式在一条 SQL 里统计
+    所有订单状态数量，避免前端多次请求或后端多次 COUNT 查询。
+
+  📌 待评价数说明:
+    tb_order.status=3(已完成) 且 该order_id 在 tb_review 表中
+    没有对应当前用户的评价记录，则视为"待评价"。
+    使用 NOT EXISTS 子查询判断。
+
+  📌 其余查询（selectTotalOrders / selectTotalSpent / selectTotalReviews
+               selectRefundingCount / selectLastBalanceLog）
+    均使用 @Select 注解直接写在 Mapper 接口上，无需在此 XML 中声明。
+-->
+<mapper namespace="com.astronomy.mall.module.user.mapper.UserOverviewMapper">
+
+    <!--
+      聚合查询各状态订单数
+      返回字段:
+        pendingPay     - 待付款 (status=0)
+        pendingShip    - 待发货 (status=1)
+        pendingReceive - 待收货 (status=2)
+        pendingReview  - 待评价 (status=3 且未评价)
+    -->
+    <select id="selectOrderStatusCount" resultType="java.util.HashMap">
+        SELECT
+            SUM(CASE WHEN o.status = 0 THEN 1 ELSE 0 END) AS pendingPay,
+            SUM(CASE WHEN o.status = 1 THEN 1 ELSE 0 END) AS pendingShip,
+            SUM(CASE WHEN o.status = 2 THEN 1 ELSE 0 END) AS pendingReceive,
+            SUM(
+                    CASE
+                        WHEN o.status = 3
+                            AND NOT EXISTS (
+                                SELECT 1 FROM tb_review r
+                                WHERE r.order_id = o.id
+                                  AND r.user_id = #{userId}
+                                  AND r.deleted = 0
+                            )
+                            THEN 1
+                        ELSE 0
+                        END
+            ) AS pendingReview
+        FROM tb_order o
+        WHERE o.user_id = #{userId}
+          AND o.status != 4
+    </select>
+
+</mapper>
