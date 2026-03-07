@@ -19,6 +19,8 @@ import com.astronomy.mall.module.product.entity.Product;
 import com.astronomy.mall.module.product.mapper.ProductMapper;
 import com.astronomy.mall.module.admin.entity.SystemSetting;
 import com.astronomy.mall.module.admin.mapper.SystemSettingMapper;
+import com.astronomy.mall.module.user.entity.Address;
+import com.astronomy.mall.module.user.service.AddressService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
@@ -28,36 +30,52 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+/**
+ * 订单 Service 实现
+ *
+ * 📌 v7.6 改造说明 (2.4.2 收货地址管理):
+ *   createOrder() 方法收货信息获取方式变更：
+ *   - 改造前: 从 DTO 直接读取 receiverName/receiverPhone/省市区/address 字段
+ *   - 改造后: 从 DTO 读取 addressId，调用 AddressService.getAddressById() 查询地址
+ *             再将地址各字段快照到 Order 实体，防止用户后续删地址影响历史订单
+ */
 @Service
 @RequiredArgsConstructor
 public class OrderServiceImpl implements OrderService {
 
-    private final OrderMapper orderMapper;
-    private final OrderItemMapper orderItemMapper;
-    private final CartMapper cartMapper;
-    private final ProductMapper productMapper;
-    private final SystemSettingMapper systemSettingMapper;  // 🆕 运费设置
+    private final OrderMapper          orderMapper;
+    private final OrderItemMapper      orderItemMapper;
+    private final CartMapper           cartMapper;
+    private final ProductMapper        productMapper;
+    private final SystemSettingMapper  systemSettingMapper;
+
+    // 📌 v7.6 新增注入：地址服务，用于下单时查询并快照地址
+    private final AddressService addressService;
 
     @Autowired
     private NotificationHelper notificationHelper;
 
+    // =====================================================================
+    // 创建订单
+    // =====================================================================
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public OrderVO createOrder(Long userId, CreateOrderDTO dto) {
-        // 1. 查询选中的购物车项
+
+        // ── Step 1: 查询选中的购物车项 ───────────────────────────────────
         List<CartVO> cartItems = cartMapper.selectSelectedCartItems(userId);
         if (cartItems.isEmpty()) {
             throw new BusinessException(2201, "请选择要购买的商品");
         }
 
-        // 2. 过滤出指定的购物车项(如果传了cartIds)
+        // ── Step 2: 按传入的 cartIds 过滤（若传了的话）────────────────────
         if (dto.getCartIds() != null && !dto.getCartIds().isEmpty()) {
             List<Long> cartIds = dto.getCartIds();
             cartItems = cartItems.stream()
@@ -65,7 +83,7 @@ public class OrderServiceImpl implements OrderService {
                     .collect(Collectors.toList());
         }
 
-        // 3. 检查库存并计算商品总金额
+        // ── Step 3: 校验库存 + 计算商品总金额 ───────────────────────────
         BigDecimal totalAmount = BigDecimal.ZERO;
         for (CartVO cartItem : cartItems) {
             Product product = productMapper.selectById(cartItem.getProductId());
@@ -75,40 +93,45 @@ public class OrderServiceImpl implements OrderService {
             if (product.getStock() < cartItem.getQuantity()) {
                 throw new BusinessException(2002, "商品[" + product.getProductName() + "]库存不足");
             }
-            BigDecimal subtotal = product.getPrice()
-                    .multiply(BigDecimal.valueOf(cartItem.getQuantity()));
-            totalAmount = totalAmount.add(subtotal);
+            totalAmount = totalAmount.add(
+                    product.getPrice().multiply(BigDecimal.valueOf(cartItem.getQuantity()))
+            );
         }
 
-        // 🆕 4. 从系统设置读取运费规则，动态计算运费
+        // ── Step 4: 动态计算运费（从系统设置读取）─────────────────────────
         BigDecimal freight = calcFreight(totalAmount);
 
-        // 5. 创建订单
+        // ── Step 5: 查询收货地址并快照 ──────────────────────────────────
+        // 📌 v7.6 核心改造：通过 addressId 查询 tb_address，再把字段快照到订单
+        //    Address.getAddressById() 内部已校验地址归属（防止用他人地址下单）
+        Address address = addressService.getAddressById(userId, dto.getAddressId());
+
+        // ── Step 6: 构建订单实体 ─────────────────────────────────────────
         Order order = new Order();
         order.setOrderNo(generateOrderNo());
         order.setUserId(userId);
 
-        // 收货信息
-        order.setReceiverName(dto.getReceiverName());
-        order.setReceiverPhone(dto.getReceiverPhone());
-        order.setReceiverProvince(dto.getReceiverProvince());
-        order.setReceiverCity(dto.getReceiverCity());
-        order.setReceiverDistrict(dto.getReceiverDistrict());
-        order.setReceiverAddress(dto.getReceiverAddress());
+        // 收货信息快照（地址删除后历史订单不受影响）
+        order.setReceiverName(address.getReceiverName());
+        order.setReceiverPhone(address.getReceiverPhone());
+        order.setReceiverProvince(address.getProvince());
+        order.setReceiverCity(address.getCity());
+        order.setReceiverDistrict(address.getDistrict());
+        order.setReceiverAddress(address.getDetail());  // detail → receiverAddress
 
         // 价格信息
         order.setTotalAmount(totalAmount);
-        order.setFreight(freight);                                    // 🆕 动态运费
+        order.setFreight(freight);
         order.setDiscountAmount(BigDecimal.ZERO);
-        order.setPaymentAmount(totalAmount.add(freight));             // 🆕 应付 = 商品总额 + 运费
+        order.setPaymentAmount(totalAmount.add(freight));  // 应付 = 商品总额 + 运费
 
-        // 订单状态
-        order.setStatus(0); // 待支付
+        // 订单状态 + 备注
+        order.setStatus(0);  // 待支付
         order.setRemark(dto.getRemark());
 
         orderMapper.insert(order);
 
-        // 6. 创建订单详情 + 扣减库存
+        // ── Step 7: 创建订单详情 + 扣减库存 ─────────────────────────────
         List<OrderItem> orderItems = new ArrayList<>();
         for (CartVO cartItem : cartItems) {
             Product product = productMapper.selectById(cartItem.getProductId());
@@ -121,9 +144,9 @@ public class OrderServiceImpl implements OrderService {
             orderItem.setProductPrice(product.getPrice());
             orderItem.setProductBrand(product.getBrand());
             orderItem.setQuantity(cartItem.getQuantity());
-            BigDecimal totalPrice = product.getPrice()
-                    .multiply(BigDecimal.valueOf(cartItem.getQuantity()));
-            orderItem.setTotalPrice(totalPrice);
+            orderItem.setTotalPrice(
+                    product.getPrice().multiply(BigDecimal.valueOf(cartItem.getQuantity()))
+            );
 
             orderItems.add(orderItem);
             orderItemMapper.insert(orderItem);
@@ -133,27 +156,33 @@ public class OrderServiceImpl implements OrderService {
             productMapper.updateById(product);
         }
 
-        // 7. 删除购物车中的已购买商品
-        List<Long> cartIds = cartItems.stream()
+        // ── Step 8: 删除购物车中的已购买商品 ────────────────────────────
+        List<Long> purchasedCartIds = cartItems.stream()
                 .map(CartVO::getId)
                 .collect(Collectors.toList());
-        if (!cartIds.isEmpty()) {
+        if (!purchasedCartIds.isEmpty()) {
             LambdaQueryWrapper<Cart> wrapper = new LambdaQueryWrapper<>();
-            wrapper.in(Cart::getId, cartIds);
+            wrapper.in(Cart::getId, purchasedCartIds);
             cartMapper.delete(wrapper);
         }
 
-        // 8. 返回订单VO
+        // ── Step 9: 返回订单 VO ──────────────────────────────────────────
         return convertToVO(order, orderItems);
     }
 
+    // =====================================================================
+    // 动态计算运费（从系统设置读取规则）
+    // =====================================================================
+
     /**
-     * 🆕 根据系统设置动态计算运费
+     * 根据系统设置动态计算运费
      *
      * 规则：
-     *  1. defaultFreight == 0                          → 全场免运费
-     *  2. freeFreightEnabled && totalAmount >= freeFreightAmount → 满额包邮，运费 = 0
-     *  3. 其他情况                                     → 收取 defaultFreight
+     * 1. defaultFreight == 0                              → 全场免运费
+     * 2. freeFreightEnabled && totalAmount >= threshold   → 满额包邮，运费 = 0
+     * 3. 其他情况                                         → 收取 defaultFreight
+     *
+     * 读取失败时兜底返回 0，不阻塞下单流程
      */
     private BigDecimal calcFreight(BigDecimal totalAmount) {
         try {
@@ -161,46 +190,48 @@ public class OrderServiceImpl implements OrderService {
             Map<String, String> fs = new HashMap<>();
             settings.forEach(s -> fs.put(s.getSettingKey(), s.getSettingValue()));
 
-            BigDecimal defaultFreight     = new BigDecimal(fs.getOrDefault("default_freight",      "0"));
+            BigDecimal defaultFreight     = new BigDecimal(fs.getOrDefault("default_freight",       "0"));
             boolean    freeFreightEnabled = Boolean.parseBoolean(fs.getOrDefault("free_freight_enabled", "false"));
-            BigDecimal freeFreightAmount  = new BigDecimal(fs.getOrDefault("free_freight_amount",   "0"));
+            BigDecimal freeFreightAmount  = new BigDecimal(fs.getOrDefault("free_freight_amount",    "0"));
 
-            // 全场免运费
             if (defaultFreight.compareTo(BigDecimal.ZERO) == 0) {
                 return BigDecimal.ZERO;
             }
-            // 满额包邮
             if (freeFreightEnabled && totalAmount.compareTo(freeFreightAmount) >= 0) {
                 return BigDecimal.ZERO;
             }
             return defaultFreight;
 
         } catch (Exception e) {
-            // 读取设置失败时兜底返回 0，不影响下单流程
             return BigDecimal.ZERO;
         }
     }
 
+    // =====================================================================
+    // 订单列表
+    // =====================================================================
+
     @Override
     public Page<OrderVO> getOrderList(Long userId, Integer status, Integer pageNum, Integer pageSize) {
-
         LambdaQueryWrapper<Order> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Order::getUserId, userId);
         if (status != null) {
             wrapper.eq(Order::getStatus, status);
         }
         wrapper.orderByDesc(Order::getCreateTime);
-        Page<Order> page = new Page<>(pageNum, pageSize);
-        Page<Order> orderPage = orderMapper.selectPage(page, wrapper);
 
-        Page<OrderVO> voPage = new Page<>(pageNum, pageSize, orderPage.getTotal());
-        List<OrderVO> voList = orderPage.getRecords().stream()
+        Page<Order> page = orderMapper.selectPage(new Page<>(pageNum, pageSize), wrapper);
+
+        Page<OrderVO> voPage = new Page<>(pageNum, pageSize, page.getTotal());
+        voPage.setRecords(page.getRecords().stream()
                 .map(this::convertToVO)
-                .collect(Collectors.toList());
-        voPage.setRecords(voList);
-
+                .collect(Collectors.toList()));
         return voPage;
     }
+
+    // =====================================================================
+    // 订单详情
+    // =====================================================================
 
     @Override
     public OrderVO getOrderDetail(Long userId, Long orderId) {
@@ -208,13 +239,14 @@ public class OrderServiceImpl implements OrderService {
         if (order == null || !order.getUserId().equals(userId)) {
             throw new BusinessException(3001, "订单不存在");
         }
-
         LambdaQueryWrapper<OrderItem> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(OrderItem::getOrderId, orderId);
-        List<OrderItem> orderItems = orderItemMapper.selectList(wrapper);
-
-        return convertToVO(order, orderItems);
+        return convertToVO(order, orderItemMapper.selectList(wrapper));
     }
+
+    // =====================================================================
+    // 取消订单
+    // =====================================================================
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -223,7 +255,6 @@ public class OrderServiceImpl implements OrderService {
         if (order == null || !order.getUserId().equals(userId)) {
             throw new BusinessException(3001, "订单不存在");
         }
-
         if (order.getStatus() != 0) {
             throw new BusinessException(3002, "只能取消待支付的订单");
         }
@@ -232,7 +263,6 @@ public class OrderServiceImpl implements OrderService {
         LambdaQueryWrapper<OrderItem> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(OrderItem::getOrderId, orderId);
         List<OrderItem> orderItems = orderItemMapper.selectList(wrapper);
-
         for (OrderItem item : orderItems) {
             Product product = productMapper.selectById(item.getProductId());
             if (product != null) {
@@ -247,11 +277,13 @@ public class OrderServiceImpl implements OrderService {
         orderMapper.updateById(order);
 
         notificationHelper.sendOrderCancelledNotification(
-                order.getUserId(),
-                order.getOrderNo(),
-                order.getId()
+                order.getUserId(), order.getOrderNo(), order.getId()
         );
     }
+
+    // =====================================================================
+    // 确认收货
+    // =====================================================================
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -260,7 +292,6 @@ public class OrderServiceImpl implements OrderService {
         if (order == null || !order.getUserId().equals(userId)) {
             throw new BusinessException(3001, "订单不存在");
         }
-
         if (order.getStatus() != 2) {
             throw new BusinessException(3003, "只能确认待收货的订单");
         }
@@ -271,11 +302,13 @@ public class OrderServiceImpl implements OrderService {
         orderMapper.updateById(order);
 
         notificationHelper.sendOrderCompletedNotification(
-                order.getUserId(),
-                order.getOrderNo(),
-                order.getId()
+                order.getUserId(), order.getOrderNo(), order.getId()
         );
     }
+
+    // =====================================================================
+    // 删除订单
+    // =====================================================================
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -284,13 +317,15 @@ public class OrderServiceImpl implements OrderService {
         if (order == null || !order.getUserId().equals(userId)) {
             throw new BusinessException(3001, "订单不存在");
         }
-
         if (order.getStatus() != 3 && order.getStatus() != 4) {
             throw new BusinessException(3004, "只能删除已取消或已完成的订单");
         }
-
         orderMapper.deleteById(orderId);
     }
+
+    // =====================================================================
+    // 私有工具方法
+    // =====================================================================
 
     private String generateOrderNo() {
         String timestamp = DateUtil.format(LocalDateTime.now(), "yyyyMMddHHmmss");
@@ -298,44 +333,37 @@ public class OrderServiceImpl implements OrderService {
         return "ORD" + timestamp + randomNum;
     }
 
+    /** 单参数版（内部查询订单列表时使用，自动查 orderItems） */
     private OrderVO convertToVO(Order order) {
         OrderVO vo = BeanUtil.copyProperties(order, OrderVO.class);
-
-        vo.setFullAddress(order.getReceiverProvince() + " " +
-                order.getReceiverCity() + " " +
-                order.getReceiverDistrict() + " " +
-                order.getReceiverAddress());
-
+        vo.setFullAddress(buildFullAddress(order));
         vo.setStatusText(getStatusText(order.getStatus()));
 
         LambdaQueryWrapper<OrderItem> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(OrderItem::getOrderId, order.getId());
-        List<OrderItem> orderItems = orderItemMapper.selectList(wrapper);
-
-        List<OrderItemVO> itemVOList = orderItems.stream()
+        vo.setItems(orderItemMapper.selectList(wrapper).stream()
                 .map(item -> BeanUtil.copyProperties(item, OrderItemVO.class))
-                .collect(Collectors.toList());
-        vo.setItems(itemVOList);
-
+                .collect(Collectors.toList()));
         return vo;
     }
 
+    /** 双参数版（创建订单 / 订单详情时使用，已有 orderItems 不重复查库） */
     private OrderVO convertToVO(Order order, List<OrderItem> orderItems) {
         OrderVO vo = BeanUtil.copyProperties(order, OrderVO.class);
-
-        vo.setFullAddress(order.getReceiverProvince() + " " +
-                order.getReceiverCity() + " " +
-                order.getReceiverDistrict() + " " +
-                order.getReceiverAddress());
-
+        vo.setFullAddress(buildFullAddress(order));
         vo.setStatusText(getStatusText(order.getStatus()));
-
-        List<OrderItemVO> itemVOList = orderItems.stream()
+        vo.setItems(orderItems.stream()
                 .map(item -> BeanUtil.copyProperties(item, OrderItemVO.class))
-                .collect(Collectors.toList());
-        vo.setItems(itemVOList);
-
+                .collect(Collectors.toList()));
         return vo;
+    }
+
+    /** 拼接完整地址 */
+    private String buildFullAddress(Order order) {
+        return order.getReceiverProvince() + " "
+                + order.getReceiverCity()     + " "
+                + order.getReceiverDistrict() + " "
+                + order.getReceiverAddress();
     }
 
     private String getStatusText(Integer status) {

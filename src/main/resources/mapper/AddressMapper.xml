@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.astronomy.mall.module.user.mapper.AddressMapper">
+
+    <!-- 通用结果映射 -->
+    <resultMap id="AddressResultMap" type="com.astronomy.mall.module.user.entity.Address">
+        <id     column="id"             property="id"/>
+        <result column="user_id"        property="userId"/>
+        <result column="receiver_name"  property="receiverName"/>
+        <result column="receiver_phone" property="receiverPhone"/>
+        <result column="province"       property="province"/>
+        <result column="city"           property="city"/>
+        <result column="district"       property="district"/>
+        <result column="detail"         property="detail"/>
+        <result column="is_default"     property="isDefault"/>
+        <result column="create_time"    property="createTime"/>
+        <result column="update_time"    property="updateTime"/>
+    </resultMap>
+
+    <!--
+        查询用户地址列表
+        排序规则: 默认地址 (is_default=1) 置顶，其余按 id 升序（按添加时间排序）
+    -->
+    <select id="selectByUserId" resultMap="AddressResultMap">
+        SELECT id, user_id, receiver_name, receiver_phone,
+               province, city, district, detail,
+               is_default, create_time, update_time
+        FROM tb_address
+        WHERE user_id = #{userId}
+        ORDER BY is_default DESC, id ASC
+    </select>
+
+    <!--
+        统计用户当前地址数量
+        用于限制最多5个地址的校验
+    -->
+    <select id="countByUserId" resultType="int">
+        SELECT COUNT(*)
+        FROM tb_address
+        WHERE user_id = #{userId}
+    </select>
+
+    <!--
+        清除用户所有默认地址标记
+        ⚠️ 与 setDefault 在同一事务中调用
+    -->
+    <update id="clearDefault">
+        UPDATE tb_address
+        SET is_default = 0
+        WHERE user_id = #{userId}
+    </update>
+
+    <!--
+        将指定地址设为默认地址
+        ⚠️ AND user_id = #{userId} 防止越权操作他人地址
+    -->
+    <update id="setDefault">
+        UPDATE tb_address
+        SET is_default = 1
+        WHERE id = #{addressId}
+          AND user_id = #{userId}
+    </update>
+
+</mapper>
