@@ -8,6 +8,7 @@ import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import javax.servlet.http.HttpServletRequest;
@@ -76,10 +77,10 @@ public class UserController {
     }
 
     /**
-     * 修改密码
+     * 修改密码 (旧接口，保留兼容)
      */
     @PutMapping("/password")
-    @ApiOperation("修改密码")
+    @ApiOperation("修改密码(旧接口)")
     public Result<String> changePassword(@RequestParam String oldPassword,
                                          @RequestParam String newPassword,
                                          HttpServletRequest request) {
@@ -89,13 +90,28 @@ public class UserController {
     }
 
     /**
+     * 修改密码 (新接口 v7.7)
+     * POST /api/user/change-password
+     *
+     * 成功后前端负责:
+     *   1. 清除 Cookie 中的 Token
+     *   2. 跳转 /login 并提示"密码已修改，请重新登录"
+     */
+    @PostMapping("/change-password")
+    @ApiOperation("修改密码(含二次确认校验)")
+    public Result<Void> changePasswordSecure(@Validated @RequestBody ChangePasswordDTO dto,
+                                             HttpServletRequest request) {
+        Long userId = getUserIdFromRequest(request);
+        userService.changePasswordSecure(userId, dto);
+        return Result.success();
+    }
+
+    /**
      * 用户登出
      */
     @PostMapping("/logout")
     @ApiOperation("用户登出")
     public Result<String> logout() {
-        // JWT是无状态的,前端删除token即可
-        // 这里可以记录登出日志
         return Result.success("登出成功");
     }
 

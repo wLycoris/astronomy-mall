@@ -71,9 +71,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         user.setNickname(registerDTO.getNickname());
         user.setEmail(registerDTO.getEmail());
         user.setPhone(registerDTO.getPhone());
-        user.setRole(0); // 默认普通用户
-        user.setStatus(1); // 默认启用
-        user.setObservationLevel(1); // 默认入门级别
+        user.setRole(0);
+        user.setStatus(1);
+        user.setObservationLevel(1);
 
         userMapper.insert(user);
 
@@ -87,7 +87,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         // 1. 查询用户
         User user = getUserByUsername(loginDTO.getUsername());
         if (user == null) {
-            // 记录登录失败日志
             saveLoginLog(null, loginDTO.getUsername(), ipAddress, device, 0, "用户不存在");
             throw new BusinessException(ResultCode.USER_NOT_EXIST);
         }
@@ -160,7 +159,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
             }
         }
 
-        // 更新用户信息
         BeanUtil.copyProperties(userInfoDTO, user, "id", "username", "password", "role", "status");
         userMapper.updateById(user);
 
@@ -176,17 +174,51 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
             throw new BusinessException(ResultCode.USER_NOT_EXIST);
         }
 
-        // 验证旧密码
         if (!MD5Util.verify(oldPassword, user.getPassword())) {
             throw new BusinessException(ResultCode.PASSWORD_ERROR);
         }
 
-        // 更新密码
         user.setPassword(MD5Util.encrypt(newPassword));
         userMapper.updateById(user);
 
         log.info("用户密码修改成功: {}", user.getUsername());
         return true;
+    }
+
+    /**
+     * 修改密码 (新接口 v7.7)
+     * 新增校验: 两次新密码一致 + 新密码不能与旧密码相同
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void changePasswordSecure(Long userId, ChangePasswordDTO dto) {
+
+        // 1. 两次新密码必须一致
+        if (!dto.getNewPassword().equals(dto.getConfirmPassword())) {
+            throw new BusinessException("两次输入的新密码不一致");
+        }
+
+        // 2. 查询用户
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new BusinessException(ResultCode.USER_NOT_EXIST);
+        }
+
+        // 3. 验证旧密码
+        if (!MD5Util.verify(dto.getOldPassword(), user.getPassword())) {
+            throw new BusinessException("旧密码不正确");
+        }
+
+        // 4. 新密码不能与旧密码相同
+        if (MD5Util.encrypt(dto.getNewPassword()).equals(user.getPassword())) {
+            throw new BusinessException("新密码不能与旧密码相同");
+        }
+
+        // 5. 加密并更新
+        user.setPassword(MD5Util.encrypt(dto.getNewPassword()));
+        userMapper.updateById(user);
+
+        log.info("用户 [{}] 通过新接口修改密码成功", userId);
     }
 
     @Override
@@ -196,9 +228,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         return userMapper.selectOne(wrapper);
     }
 
-    /**
-     * 保存登录日志
-     */
     private void saveLoginLog(Long userId, String username, String ipAddress,
                               String device, Integer status, String message) {
         LoginLog loginLog = new LoginLog();
@@ -211,9 +240,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         loginLogMapper.insert(loginLog);
     }
 
-    /**
-     * 转换为VO
-     */
     private UserVO convertToVO(User user) {
         UserVO userVO = new UserVO();
         BeanUtil.copyProperties(user, userVO, "password", "deleted");

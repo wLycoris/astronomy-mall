@@ -1,5 +1,6 @@
 package com.astronomy.mall.module.user.service;
 
+import com.astronomy.mall.common.exception.BusinessException;
 import com.astronomy.mall.module.user.dto.*;
 import com.astronomy.mall.module.user.entity.User;
 import com.baomidou.mybatisplus.extension.service.IService;
@@ -11,54 +12,41 @@ public interface UserService extends IService<User> {
 
     /**
      * 用户注册
-     *
-     * @param registerDTO 注册信息
-     * @return 注册成功的用户ID
      */
     Long register(UserRegisterDTO registerDTO);
 
     /**
      * 用户登录
-     *
-     * @param loginDTO 登录信息
-     * @param ipAddress 登录IP
-     * @param device 登录设备
-     * @return 登录结果(包含token和用户信息)
      */
     LoginVO login(UserLoginDTO loginDTO, String ipAddress, String device);
 
     /**
      * 获取当前用户信息
-     *
-     * @param userId 用户ID
-     * @return 用户信息VO
      */
     UserVO getUserInfo(Long userId);
 
     /**
      * 更新用户信息
-     *
-     * @param userId 用户ID
-     * @param userInfoDTO 更新的信息
-     * @return true-成功, false-失败
      */
     boolean updateUserInfo(Long userId, UserInfoDTO userInfoDTO);
 
     /**
-     * 修改密码
-     *
-     * @param userId 用户ID
-     * @param oldPassword 旧密码
-     * @param newPassword 新密码
-     * @return true-成功, false-失败
+     * 修改密码 (旧接口，保留兼容)
      */
     boolean changePassword(Long userId, String oldPassword, String newPassword);
 
     /**
-     * 根据用户名查询用户
+     * 修改密码 (新接口 v7.7)
+     * 校验: 旧密码正确 + 两次新密码一致 + 新密码不能与旧密码相同
      *
-     * @param username 用户名
-     * @return 用户实体
+     * @param userId 当前登录用户ID
+     * @param dto    ChangePasswordDTO (oldPassword/newPassword/confirmPassword)
+     * @throws BusinessException 旧密码不正确 / 两次新密码不一致 / 新旧密码相同
+     */
+    void changePasswordSecure(Long userId, ChangePasswordDTO dto);
+
+    /**
+     * 根据用户名查询用户
      */
     User getUserByUsername(String username);
 }
