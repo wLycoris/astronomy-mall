@@ -3,13 +3,30 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.astronomy.mall.module.user.mapper.UserMapper">
 
-    <!-- 基础字段 -->
+    <!-- 基础字段（2.4.4 新增 balance） -->
     <sql id="BaseColumns">
         id, username, password, nickname, email, phone, avatar,
         interest_tags, observation_level, city, province, longitude, latitude,
-        role, status, deleted, create_time, update_time, last_login_time
+        role, status, deleted, create_time, update_time, last_login_time, balance
     </sql>
 
     <!-- 自定义SQL示例(如果需要) -->
+
+    <!-- ── 2.4.4 钱包系统 新增 ───────────────────────────────────────── -->
+
+    <!-- 行锁查询用户（仅供 BalanceService 使用） -->
+    <select id="selectByIdForUpdate" resultType="com.astronomy.mall.module.user.entity.User">
+        SELECT id, balance, username, nickname
+        FROM tb_user
+        WHERE id = #{userId}
+            FOR UPDATE
+    </select>
+
+    <!-- 更新余额（仅供 BalanceService 使用） -->
+    <update id="updateBalance">
+        UPDATE tb_user
+        SET balance = #{balance}, update_time = NOW()
+        WHERE id = #{userId}
+    </update>
 
 </mapper>

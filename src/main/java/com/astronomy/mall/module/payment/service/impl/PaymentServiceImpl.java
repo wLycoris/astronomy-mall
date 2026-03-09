@@ -12,6 +12,7 @@ import com.astronomy.mall.module.payment.entity.Payment;
 import com.astronomy.mall.module.payment.mapper.PaymentMapper;
 import com.astronomy.mall.module.payment.service.PaymentService;
 import com.astronomy.mall.module.payment.vo.PaymentVO;
+import com.astronomy.mall.module.user.service.BalanceService;   // 2.4.4 新增
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.extern.slf4j.Slf4j;
@@ -33,9 +34,12 @@ public class PaymentServiceImpl implements PaymentService {
     @Autowired
     private OrderMapper orderMapper;
 
-    // 🔥 新增：注入通知助手
     @Autowired
     private NotificationHelper notificationHelper;
+
+    // 📌 2.4.4 新增：余额服务（payment_type=3 真实扣款）
+    @Autowired
+    private BalanceService balanceService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -64,13 +68,12 @@ public class PaymentServiceImpl implements PaymentService {
         // 5. 检查是否已存在支付记录
         LambdaQueryWrapper<Payment> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Payment::getOrderId, dto.getOrderId())
-                .in(Payment::getStatus, 0, 1); // 待支付或已支付
+                .in(Payment::getStatus, 0, 1);
         Payment existPayment = paymentMapper.selectOne(wrapper);
         if (existPayment != null) {
             if (existPayment.getStatus() == 1) {
                 throw new BusinessException(ResultCode.ORDER_ALREADY_PAID);
             }
-            // 如果是待支付状态,返回已有的支付记录
             return convertToVO(existPayment);
         }
 
@@ -109,8 +112,25 @@ public class PaymentServiceImpl implements PaymentService {
             throw new BusinessException(ResultCode.ORDER_ALREADY_PAID);
         }
 
+        // ── 2.4.4 改造：payment_type=3（余额支付）真实扣款 ──────────────
+        // 之前是空壳，现在调用 BalanceService 真实扣减余额
+        // BalanceService 内部使用 SELECT...FOR UPDATE 行锁防并发
+        if (payment.getPaymentType() == 3) {
+            Order orderForBalance = orderMapper.selectById(payment.getOrderId());
+            balanceService.changeBalance(
+                    userId,
+                    payment.getPaymentAmount().negate(),   // 负数=支出
+                    4,                                     // type=4 购物扣款
+                    "订单支付: " + (orderForBalance != null ? orderForBalance.getOrderNo() : payment.getOrderNo()),
+                    payment.getOrderId(),
+                    "order"
+            );
+            log.info("余额支付成功: paymentNo={}, amount={}", payment.getPaymentNo(), payment.getPaymentAmount());
+        }
+        // ── 余额支付改造结束 ─────────────────────────────────────────────
+
         // 4. 更新支付状态
-        payment.setStatus(1); // 支付成功
+        payment.setStatus(1);
         payment.setPaymentTime(LocalDateTime.now());
         payment.setTransactionId("MOCK_" + System.currentTimeMillis());
         paymentMapper.updateById(payment);
@@ -125,7 +145,7 @@ public class PaymentServiceImpl implements PaymentService {
 
         log.info("模拟支付成功: paymentNo={}, orderId={}", payment.getPaymentNo(), payment.getOrderId());
 
-        // 🔥 6. 发送支付成功通知
+        // 6. 发送支付成功通知
         if (order != null) {
             notificationHelper.sendOrderPaidNotification(
                     order.getUserId(),
@@ -175,7 +195,6 @@ public class PaymentServiceImpl implements PaymentService {
 
         Page<Payment> paymentPage = paymentMapper.selectPage(page, wrapper);
 
-        // 转换VO
         Page<PaymentVO> voPage = new Page<>(pageNum, pageSize);
         voPage.setTotal(paymentPage.getTotal());
         List<PaymentVO> voList = paymentPage.getRecords().stream()
@@ -186,21 +205,13 @@ public class PaymentServiceImpl implements PaymentService {
         return voPage;
     }
 
-    /**
-     * 生成支付流水号
-     * 格式: PAY + 年月日 + 6位随机数
-     */
     private String generatePaymentNo() {
         String date = DateUtil.format(LocalDateTime.now(), "yyyyMMddHHmmss");
         String random = String.valueOf((int)((Math.random() * 9 + 1) * 100000));
         return "PAY" + date + random;
     }
 
-    /**
-     * 转换为VO
-     */
     private PaymentVO convertToVO(Payment payment) {
-        PaymentVO vo = BeanUtil.copyProperties(payment, PaymentVO.class);
-        return vo;
+        return BeanUtil.copyProperties(payment, PaymentVO.class);
     }
 }

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!--
+    文件路径: resources/mapper/BalanceLogMapper.xml
+    对应接口: com.astronomy.mall.module.user.mapper.BalanceLogMapper
+-->
+<mapper namespace="com.astronomy.mall.module.user.mapper.BalanceLogMapper">
+
+    <!-- 结果映射 -->
+    <resultMap id="BaseResultMap" type="com.astronomy.mall.module.user.entity.BalanceLog">
+        <id     column="id"             property="id"/>
+        <result column="user_id"        property="userId"/>
+        <result column="type"           property="type"/>
+        <result column="amount"         property="amount"/>
+        <result column="balance_before" property="balanceBefore"/>
+        <result column="balance_after"  property="balanceAfter"/>
+        <result column="remark"         property="remark"/>
+        <result column="related_id"     property="relatedId"/>
+        <result column="related_type"   property="relatedType"/>
+        <result column="create_time"    property="createTime"/>
+    </resultMap>
+
+    <!-- 查询最近 N 条流水 -->
+    <select id="selectRecentByUserId" resultMap="BaseResultMap">
+        SELECT id, user_id, type, amount, balance_before, balance_after,
+               remark, related_id, related_type, create_time
+        FROM tb_balance_log
+        WHERE user_id = #{userId}
+        ORDER BY create_time DESC
+            LIMIT #{limit}
+    </select>
+
+    <!-- 分页查询完整流水 -->
+    <select id="selectPageByUserId" resultMap="BaseResultMap">
+        SELECT id, user_id, type, amount, balance_before, balance_after,
+               remark, related_id, related_type, create_time
+        FROM tb_balance_log
+        WHERE user_id = #{userId}
+        ORDER BY create_time DESC
+    </select>
+
+</mapper>

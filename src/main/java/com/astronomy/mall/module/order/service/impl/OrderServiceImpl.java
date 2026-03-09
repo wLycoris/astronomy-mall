@@ -102,8 +102,6 @@ public class OrderServiceImpl implements OrderService {
         BigDecimal freight = calcFreight(totalAmount);
 
         // ── Step 5: 查询收货地址并快照 ──────────────────────────────────
-        // 📌 v7.6 核心改造：通过 addressId 查询 tb_address，再把字段快照到订单
-        //    Address.getAddressById() 内部已校验地址归属（防止用他人地址下单）
         Address address = addressService.getAddressById(userId, dto.getAddressId());
 
         // ── Step 6: 构建订单实体 ─────────────────────────────────────────
@@ -111,21 +109,20 @@ public class OrderServiceImpl implements OrderService {
         order.setOrderNo(generateOrderNo());
         order.setUserId(userId);
 
-        // 收货信息快照（地址删除后历史订单不受影响）
+        // 收货信息快照
         order.setReceiverName(address.getReceiverName());
         order.setReceiverPhone(address.getReceiverPhone());
         order.setReceiverProvince(address.getProvince());
         order.setReceiverCity(address.getCity());
         order.setReceiverDistrict(address.getDistrict());
-        order.setReceiverAddress(address.getDetail());  // detail → receiverAddress
+        order.setReceiverAddress(address.getDetail());
 
         // 价格信息
         order.setTotalAmount(totalAmount);
         order.setFreight(freight);
         order.setDiscountAmount(BigDecimal.ZERO);
-        order.setPaymentAmount(totalAmount.add(freight));  // 应付 = 商品总额 + 运费
+        order.setPaymentAmount(totalAmount.add(freight));
 
-        // 订单状态 + 备注
         order.setStatus(0);  // 待支付
         order.setRemark(dto.getRemark());
 
@@ -151,7 +148,6 @@ public class OrderServiceImpl implements OrderService {
             orderItems.add(orderItem);
             orderItemMapper.insert(orderItem);
 
-            // 扣减库存
             product.setStock(product.getStock() - cartItem.getQuantity());
             productMapper.updateById(product);
         }
@@ -174,16 +170,6 @@ public class OrderServiceImpl implements OrderService {
     // 动态计算运费（从系统设置读取规则）
     // =====================================================================
 
-    /**
-     * 根据系统设置动态计算运费
-     *
-     * 规则：
-     * 1. defaultFreight == 0                              → 全场免运费
-     * 2. freeFreightEnabled && totalAmount >= threshold   → 满额包邮，运费 = 0
-     * 3. 其他情况                                         → 收取 defaultFreight
-     *
-     * 读取失败时兜底返回 0，不阻塞下单流程
-     */
     private BigDecimal calcFreight(BigDecimal totalAmount) {
         try {
             List<SystemSetting> settings = systemSettingMapper.selectByGroupName("freight");
@@ -259,7 +245,6 @@ public class OrderServiceImpl implements OrderService {
             throw new BusinessException(3002, "只能取消待支付的订单");
         }
 
-        // 恢复库存
         LambdaQueryWrapper<OrderItem> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(OrderItem::getOrderId, orderId);
         List<OrderItem> orderItems = orderItemMapper.selectList(wrapper);
@@ -333,7 +318,6 @@ public class OrderServiceImpl implements OrderService {
         return "ORD" + timestamp + randomNum;
     }
 
-    /** 单参数版（内部查询订单列表时使用，自动查 orderItems） */
     private OrderVO convertToVO(Order order) {
         OrderVO vo = BeanUtil.copyProperties(order, OrderVO.class);
         vo.setFullAddress(buildFullAddress(order));
@@ -347,7 +331,6 @@ public class OrderServiceImpl implements OrderService {
         return vo;
     }
 
-    /** 双参数版（创建订单 / 订单详情时使用，已有 orderItems 不重复查库） */
     private OrderVO convertToVO(Order order, List<OrderItem> orderItems) {
         OrderVO vo = BeanUtil.copyProperties(order, OrderVO.class);
         vo.setFullAddress(buildFullAddress(order));
@@ -358,7 +341,6 @@ public class OrderServiceImpl implements OrderService {
         return vo;
     }
 
-    /** 拼接完整地址 */
     private String buildFullAddress(Order order) {
         return order.getReceiverProvince() + " "
                 + order.getReceiverCity()     + " "
