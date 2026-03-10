@@ -13,6 +13,8 @@ import java.util.Map;
 /**
  * 通知助手类 - 提供简化的通知发送方法
  * 各业务模块通过此类发送通知,实现解耦
+ *
+ * 📌 2026-03-10 新增: sendInstallationConfirmedNotification (2.5.1 安装预约)
  */
 @Slf4j
 @Component
@@ -39,7 +41,7 @@ public class NotificationHelper {
                 .type("order_paid")
                 .relatedId(orderId)
                 .relatedType("order")
-                .priority(1)  // 重要
+                .priority(1)
                 .variables(variables)
                 .build();
 
@@ -47,6 +49,41 @@ public class NotificationHelper {
             notificationService.sendNotification(dto);
         } catch (Exception e) {
             log.error("发送订单支付成功通知失败", e);
+        }
+    }
+
+    /**
+     * 发送安装预约已取消通知
+     *
+     * 📌 触发时机: AdminInstallationServiceImpl.cancelInstallation() 执行后
+     * 📌 通知模板: MALL_INSTALLATION_CANCELLED
+     * 📌 模板变量: reason
+     * 📌 跳转路径: /after-sale/installation
+     *
+     * @param userId         接收通知的用户ID
+     * @param reason         取消原因（adminRemark）
+     * @param installationId 安装预约ID（related_id）
+     */
+    @Async
+    public void sendInstallationCancelledNotification(Long userId, String reason, Long installationId) {
+        Map<String, Object> variables = new HashMap<>();
+        variables.put("reason", reason == null ? "无" : reason);
+
+        SendNotificationDTO dto = SendNotificationDTO.builder()
+                .userId(userId)
+                .module("mall")
+                .type("installation_cancelled")
+                .relatedId(installationId)
+                .relatedType("installation")
+                .priority(1)
+                .variables(variables)
+                .build();
+
+        try {
+            notificationService.sendNotification(dto);
+            log.info("安装预约取消通知已发送: userId={}, installationId={}", userId, installationId);
+        } catch (Exception e) {
+            log.error("发送安装预约取消通知失败: userId={}, installationId={}", userId, installationId, e);
         }
     }
 
@@ -68,7 +105,7 @@ public class NotificationHelper {
                 .type("order_shipped")
                 .relatedId(orderId)
                 .relatedType("order")
-                .priority(1)  // 重要
+                .priority(1)
                 .variables(variables)
                 .build();
 
@@ -94,7 +131,7 @@ public class NotificationHelper {
                 .type("order_delivering")
                 .relatedId(orderId)
                 .relatedType("order")
-                .priority(1)  // 重要
+                .priority(1)
                 .variables(variables)
                 .build();
 
@@ -120,7 +157,7 @@ public class NotificationHelper {
                 .type("order_completed")
                 .relatedId(orderId)
                 .relatedType("order")
-                .priority(0)  // 普通
+                .priority(0)
                 .variables(variables)
                 .build();
 
@@ -132,7 +169,6 @@ public class NotificationHelper {
     }
 
     /**
-     *
      * 发送订单取消通知
      */
     @Async
@@ -147,7 +183,7 @@ public class NotificationHelper {
                 .type("order_cancelled")
                 .relatedId(orderId)
                 .relatedType("order")
-                .priority(1)  // 重要
+                .priority(1)
                 .variables(variables)
                 .build();
 
@@ -171,8 +207,8 @@ public class NotificationHelper {
                 .userId(userId)
                 .module("mall")
                 .type("refund_approved")
-                .relatedId(orderId)       // ← 改为 orderId
-                .relatedType("order")     // ← 改为 order
+                .relatedId(orderId)
+                .relatedType("order")
                 .priority(1)
                 .variables(variables)
                 .build();
@@ -197,8 +233,8 @@ public class NotificationHelper {
                 .userId(userId)
                 .module("mall")
                 .type("refund_rejected")
-                .relatedId(orderId)       // ← 改为 orderId
-                .relatedType("order")     // ← 改为 order
+                .relatedId(orderId)
+                .relatedType("order")
                 .priority(1)
                 .variables(variables)
                 .build();
@@ -223,8 +259,8 @@ public class NotificationHelper {
                 .userId(userId)
                 .module("mall")
                 .type("refund_completed")
-                .relatedId(orderId)       // ← 改为 orderId
-                .relatedType("order")     // ← 改为 order
+                .relatedId(orderId)
+                .relatedType("order")
                 .priority(1)
                 .variables(variables)
                 .build();
@@ -235,7 +271,6 @@ public class NotificationHelper {
             log.error("发送退款到账通知失败", e);
         }
     }
-
 
     /**
      * 发送商品上架通知
@@ -252,7 +287,7 @@ public class NotificationHelper {
                 .type("product_on_sale")
                 .relatedId(productId)
                 .relatedType("product")
-                .priority(0)  // 普通
+                .priority(0)
                 .variables(variables)
                 .build();
 
@@ -279,7 +314,7 @@ public class NotificationHelper {
                 .type("product_price_down")
                 .relatedId(productId)
                 .relatedType("product")
-                .priority(0)  // 普通
+                .priority(0)
                 .variables(variables)
                 .build();
 
@@ -287,6 +322,49 @@ public class NotificationHelper {
             notificationService.sendNotification(dto);
         } catch (Exception e) {
             log.error("发送商品降价通知失败", e);
+        }
+    }
+
+    // ==================== 售后服务模块通知 ====================
+
+    /**
+     * 发送安装预约已确认通知
+     *
+     * 📌 触发时机: AdminInstallationServiceImpl.confirmInstallation() 执行后
+     * 📌 通知模板: MALL_INSTALLATION_CONFIRMED
+     * 📌 模板变量: engineerName / confirmedTime / engineerPhone
+     * 📌 跳转路径: /after-sale/installation
+     *
+     * @param userId         接收通知的用户ID
+     * @param engineerName   工程师姓名
+     * @param confirmedTime  确认上门时间（已格式化字符串，如 "2026-03-15 14:00"）
+     * @param engineerPhone  工程师联系方式
+     * @param installationId 安装预约ID（related_id）
+     */
+    @Async
+    public void sendInstallationConfirmedNotification(Long userId, String engineerName,
+                                                      String confirmedTime, String engineerPhone,
+                                                      Long installationId) {
+        Map<String, Object> variables = new HashMap<>();
+        variables.put("engineerName", engineerName == null ? "" : engineerName);
+        variables.put("confirmedTime", confirmedTime == null ? "" : confirmedTime);
+        variables.put("engineerPhone", engineerPhone == null ? "" : engineerPhone);
+
+        SendNotificationDTO dto = SendNotificationDTO.builder()
+                .userId(userId)
+                .module("mall")
+                .type("installation_confirmed")
+                .relatedId(installationId)
+                .relatedType("installation")
+                .priority(1)  // 重要
+                .variables(variables)
+                .build();
+
+        try {
+            notificationService.sendNotification(dto);
+            log.info("安装预约确认通知已发送: userId={}, installationId={}", userId, installationId);
+        } catch (Exception e) {
+            log.error("发送安装预约确认通知失败: userId={}, installationId={}", userId, installationId, e);
         }
     }
 
@@ -307,7 +385,7 @@ public class NotificationHelper {
                 .type("announcement")
                 .relatedId(noticeId)
                 .relatedType("notice")
-                .priority(2)  // 紧急
+                .priority(2)
                 .variables(variables)
                 .build();
 
@@ -330,7 +408,7 @@ public class NotificationHelper {
                 .userId(userId)
                 .module("system")
                 .type("account_security")
-                .priority(2)  // 紧急
+                .priority(2)
                 .variables(variables)
                 .build();
 

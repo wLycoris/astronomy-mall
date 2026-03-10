@@ -22,6 +22,10 @@ public enum NotificationType {
     PRODUCT_ON_SALE("product_on_sale", "商品上架", NotificationModule.MALL),
     PRODUCT_PRICE_DOWN("product_price_down", "商品降价", NotificationModule.MALL),
 
+    // ==================== 售后服务模块 (2种) ====================
+    INSTALLATION_CONFIRMED("installation_confirmed", "安装预约已确认", NotificationModule.MALL),
+    INSTALLATION_CANCELLED("installation_cancelled", "安装预约已取消", NotificationModule.MALL),
+
     // ==================== 论坛模块 (9种) ====================
     POST_LIKED("post_liked", "帖子被点赞", NotificationModule.FORUM),
     POST_COMMENTED("post_commented", "帖子被评论", NotificationModule.FORUM),
