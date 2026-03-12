@@ -18,6 +18,8 @@ import com.astronomy.mall.module.admin.vo.ProductExportVO;
 import com.astronomy.mall.module.admin.vo.StockWarningVO;
 import com.astronomy.mall.module.cart.entity.Cart;
 import com.astronomy.mall.module.cart.mapper.CartMapper;
+import com.astronomy.mall.module.favorite.mapper.ProductFavoriteMapper;  // 🆕
+import com.astronomy.mall.module.notification.helper.NotificationHelper;  // 🆕
 import com.astronomy.mall.module.order.entity.OrderItem;
 import com.astronomy.mall.module.order.mapper.OrderItemMapper;
 import com.astronomy.mall.module.product.entity.Category;
@@ -67,6 +69,12 @@ public class AdminProductServiceImpl implements AdminProductService {
 
     @Autowired
     private UserMapper userMapper;
+
+    @Autowired  // 🆕
+    private ProductFavoriteMapper productFavoriteMapper;
+
+    @Autowired  // 🆕
+    private NotificationHelper notificationHelper;
 
     /**
      * 1. 商品列表查询 (分页/搜索/筛选)
@@ -256,6 +264,24 @@ public class AdminProductServiceImpl implements AdminProductService {
         }
 
         log.info("批量修改商品状态成功, 共 {} 件商品", products.size());
+
+        // 🆕 3. 上架时，通知收藏该商品的用户
+        if (status == 1) {
+            for (Product product : products) {
+                try {
+                    List<Long> userIds = productFavoriteMapper.selectFavoriteUserIds(product.getId());
+                    for (Long userId : userIds) {
+                        notificationHelper.sendProductOnSaleNotification(userId, product.getProductName(), product.getId());
+                    }
+                    if (!userIds.isEmpty()) {
+                        log.info("商品上架通知已发送, productId={}, 通知人数={}", product.getId(), userIds.size());
+                    }
+                } catch (Exception e) {
+                    // 通知失败不影响主流程
+                    log.error("发送商品上架通知失败, productId={}", product.getId(), e);
+                }
+            }
+        }
     }
 
     /**
@@ -531,15 +557,15 @@ public class AdminProductServiceImpl implements AdminProductService {
 
             // 4. 逐行导入
             for (int i = 0; i < importList.size(); i++) {
-                ProductImportDTO dto = importList.get(i);
+                ProductImportDTO importDto = importList.get(i);
                 int rowNum = i + 2;  // Excel行号(第1行是表头,从第2行开始)
 
                 try {
                     // 4.1 数据校验
-                    validateImportProduct(dto, rowNum);
+                    validateImportProduct(importDto, rowNum);
 
                     // 4.2 转换为实体
-                    Product product = convertToProduct(dto);
+                    Product product = convertToProduct(importDto);
 
                     // 4.3 插入数据库
                     int insertResult = productMapper.insert(product);
