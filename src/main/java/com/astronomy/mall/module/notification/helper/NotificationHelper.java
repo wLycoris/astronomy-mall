@@ -19,6 +19,8 @@ import java.util.Map;
  * 📌 2026-03-10 新增: sendInstallationConfirmedNotification (2.5.1 安装预约确认)
  * 📌 2026-03-10 新增: sendInstallationCancelledNotification (2.5.1 安装预约取消)
  * 📌 2026-03-11 新增: sendRecyclingCompleteNotification     (2.5.3 二手回收款到账)
+ * 📌 2026-03-16 新增: sendRecognitionCompletedNotification  (4.1 星图识别成功)
+ * 📌 2026-03-16 新增: sendRecognitionFailedNotification     (4.1 星图识别失败)
  */
 @Slf4j
 @Component
@@ -397,10 +399,10 @@ public class NotificationHelper {
             SendNotificationDTO dto = SendNotificationDTO.builder()
                     .userId(userId)
                     .module("mall")
-                    .type("recycling_completed")   // 对应 NotificationType.RECYCLING_COMPLETED
+                    .type("recycling_completed")
                     .relatedId(recyclingId)
                     .relatedType("recycling")
-                    .priority(1)                   // 重要通知
+                    .priority(1)
                     .variables(variables)
                     .build();
 
@@ -410,6 +412,79 @@ public class NotificationHelper {
         } catch (Exception e) {
             log.error("发送二手回收款到账通知失败: userId={}, recycleNo={}, error={}",
                     userId, recycleNo, e.getMessage(), e);
+        }
+    }
+
+    // ==================== AI 星图识别通知 ====================
+
+    /**
+     * 发送星图识别成功通知
+     *
+     * 📌 触发时机: RecognitionPollScheduler.handleSuccess() 写入结果后
+     * 📌 通知模板: AI_RECOGNITION_COMPLETED
+     * 📌 模板变量: objectNames（天体名称，多个用顿号拼接）/ recognitionId
+     * 📌 跳转路径: /recognition/result?id={recognitionId}
+     *
+     * @param userId        接收通知的用户ID
+     * @param objectNames   识别到的天体名称（已拼接好，如 "猎户座星云、M42"）
+     * @param recognitionId 识别记录ID
+     */
+    @Async
+    public void sendRecognitionCompletedNotification(Long userId, String objectNames, Long recognitionId) {
+        Map<String, Object> variables = new HashMap<>();
+        variables.put("objectNames", objectNames == null || objectNames.isEmpty() ? "未知天体" : objectNames);
+        variables.put("recognitionId", recognitionId);
+
+        SendNotificationDTO dto = SendNotificationDTO.builder()
+                .userId(userId)
+                .module("ai")
+                .type("recognition_completed")
+                .relatedId(recognitionId)
+                .relatedType("recognition")
+                .priority(1)
+                .variables(variables)
+                .build();
+
+        try {
+            notificationService.sendNotification(dto);
+            log.info("星图识别成功通知已发送: userId={}, recognitionId={}", userId, recognitionId);
+        } catch (Exception e) {
+            log.error("发送星图识别成功通知失败: userId={}, recognitionId={}", userId, recognitionId, e);
+        }
+    }
+
+    /**
+     * 发送星图识别失败通知
+     *
+     * 📌 触发时机: RecognitionPollScheduler 标记失败（job failure 或超时）后
+     * 📌 通知模板: AI_RECOGNITION_FAILED
+     * 📌 模板变量: failReason（失败原因）
+     * 📌 跳转路径: /recognition/history（历史列表，方便用户重新提交）
+     *
+     * @param userId        接收通知的用户ID
+     * @param failReason    失败原因
+     * @param recognitionId 识别记录ID
+     */
+    @Async
+    public void sendRecognitionFailedNotification(Long userId, String failReason, Long recognitionId) {
+        Map<String, Object> variables = new HashMap<>();
+        variables.put("failReason", failReason == null ? "未知原因" : failReason);
+
+        SendNotificationDTO dto = SendNotificationDTO.builder()
+                .userId(userId)
+                .module("ai")
+                .type("recognition_failed")
+                .relatedId(recognitionId)
+                .relatedType("recognition")
+                .priority(0)
+                .variables(variables)
+                .build();
+
+        try {
+            notificationService.sendNotification(dto);
+            log.info("星图识别失败通知已发送: userId={}, recognitionId={}", userId, recognitionId);
+        } catch (Exception e) {
+            log.error("发送星图识别失败通知失败: userId={}, recognitionId={}", userId, recognitionId, e);
         }
     }
 

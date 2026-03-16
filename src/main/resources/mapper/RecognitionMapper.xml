@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.astronomy.mall.module.recognition.mapper.RecognitionMapper">
+
+    <!-- ============================================================ -->
+    <!-- ResultMap: 完整映射（含 image_data）                           -->
+    <!-- ============================================================ -->
+    <resultMap id="RecognitionFullMap" type="com.astronomy.mall.module.recognition.entity.Recognition">
+        <id     column="id"                   property="id"/>
+        <result column="user_id"              property="userId"/>
+        <result column="image_data"           property="imageData"/>
+        <result column="submission_id"        property="submissionId"/>
+        <result column="job_id"               property="jobId"/>
+        <result column="status"               property="status"/>
+        <result column="objects_in_field"     property="objectsInField"/>
+        <result column="machine_tags"         property="machineTags"/>
+        <result column="ra"                   property="ra"/>
+        <result column="dec"                  property="dec"/>
+        <result column="orientation"          property="orientation"/>
+        <result column="radius"               property="radius"/>
+        <result column="result_image_url"     property="resultImageUrl"/>
+        <result column="recommended_products" property="recommendedProducts"/>
+        <result column="fail_reason"          property="failReason"/>
+        <result column="create_time"          property="createTime"/>
+        <result column="update_time"          property="updateTime"/>
+    </resultMap>
+
+    <!-- ============================================================ -->
+    <!-- ResultMap: 轻量映射（不含 image_data）                         -->
+    <!-- 用于: 列表查询、轮询任务、状态查询                              -->
+    <!-- ============================================================ -->
+    <resultMap id="RecognitionSimpleMap" type="com.astronomy.mall.module.recognition.entity.Recognition">
+        <id     column="id"                   property="id"/>
+        <result column="user_id"              property="userId"/>
+        <!-- image_data 不映射，避免大字段传输 -->
+        <result column="submission_id"        property="submissionId"/>
+        <result column="job_id"               property="jobId"/>
+        <result column="status"               property="status"/>
+        <result column="objects_in_field"     property="objectsInField"/>
+        <result column="machine_tags"         property="machineTags"/>
+        <result column="ra"                   property="ra"/>
+        <result column="dec"                  property="dec"/>
+        <result column="orientation"          property="orientation"/>
+        <result column="radius"               property="radius"/>
+        <result column="result_image_url"     property="resultImageUrl"/>
+        <result column="recommended_products" property="recommendedProducts"/>
+        <result column="fail_reason"          property="failReason"/>
+        <result column="create_time"          property="createTime"/>
+        <result column="update_time"          property="updateTime"/>
+    </resultMap>
+
+    <!-- ============================================================ -->
+    <!-- 公共列（不含 image_data）                                      -->
+    <!-- ============================================================ -->
+    <sql id="columnsWithoutImage">
+        id, user_id, submission_id, job_id, status,
+        objects_in_field, machine_tags,
+        ra, `dec`, orientation, radius,
+        result_image_url, recommended_products,
+        fail_reason, create_time, update_time
+    </sql>
+
+    <!-- ============================================================ -->
+    <!-- v4.1: updateSubmissionId                                      -->
+    <!-- ============================================================ -->
+    <update id="updateSubmissionId">
+        UPDATE tb_recognition
+        SET submission_id = #{submissionId},
+            update_time   = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <!-- ============================================================ -->
+    <!-- v4.1: updateFailed                                            -->
+    <!-- ============================================================ -->
+    <update id="updateFailed">
+        UPDATE tb_recognition
+        SET status      = 2,
+            fail_reason = #{failReason},
+            update_time = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <!-- ============================================================ -->
+    <!-- v4.2: updateJobId - 写入 job_id（从 submission 查到后调用）   -->
+    <!-- ============================================================ -->
+    <update id="updateJobId">
+        UPDATE tb_recognition
+        SET job_id      = #{jobId},
+            update_time = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <!-- ============================================================ -->
+    <!-- v4.2: updateResult - 写入识别成功结果                          -->
+    <!--                                                               -->
+    <!-- 使用 <if test> 只更新非 null 字段，保证幂等性：                 -->
+    <!--   - status 固定置为 1（成功）                                  -->
+    <!--   - job_id 若已有则不覆盖（避免重复写入导致问题）               -->
+    <!--   - 其余结果字段按实际值更新                                   -->
+    <!-- ============================================================ -->
+    <update id="updateResult">
+        UPDATE tb_recognition
+        <set>
+            status      = 1,
+            update_time = NOW(),
+            <if test="jobId != null and jobId != ''">
+                job_id = #{jobId},
+            </if>
+            <if test="ra != null">
+                ra = #{ra},
+            </if>
+            <if test="dec != null">
+                `dec` = #{dec},
+            </if>
+            <if test="orientation != null">
+                orientation = #{orientation},
+            </if>
+            <if test="radius != null">
+                radius = #{radius},
+            </if>
+            <if test="objectsInField != null">
+                objects_in_field = #{objectsInField},
+            </if>
+            <if test="machineTags != null">
+                machine_tags = #{machineTags},
+            </if>
+            <if test="resultImageUrl != null and resultImageUrl != ''">
+                result_image_url = #{resultImageUrl},
+            </if>
+        </set>
+        WHERE id = #{id}
+    </update>
+
+    <!-- ============================================================ -->
+    <!-- v4.2: selectPendingList - 查询待轮询记录                       -->
+    <!--                                                               -->
+    <!-- 条件: status=0（识别中）AND submission_id IS NOT NULL          -->
+    <!--       （submission_id 为 null 说明 submitAsync 还没完成，跳过） -->
+    <!-- 不查 image_data，使用轻量 ResultMap                            -->
+    <!-- ============================================================ -->
+    <select id="selectPendingList" resultMap="RecognitionSimpleMap">
+        SELECT
+        <include refid="columnsWithoutImage"/>
+        FROM tb_recognition
+        WHERE status = 0
+        AND submission_id IS NOT NULL
+        ORDER BY create_time ASC
+    </select>
+
+    <!-- ============================================================ -->
+    <!-- v4.2: selectHistoryByUserId - 用户历史记录列表（分页）          -->
+    <!--                                                               -->
+    <!-- 不含 image_data，按创建时间倒序                                -->
+    <!-- ============================================================ -->
+    <select id="selectHistoryByUserId" resultMap="RecognitionSimpleMap">
+        SELECT
+        <include refid="columnsWithoutImage"/>
+        FROM tb_recognition
+        WHERE user_id = #{userId}
+        ORDER BY create_time DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <!-- ============================================================ -->
+    <!-- v4.2: countHistoryByUserId - 用户历史记录总数                  -->
+    <!-- ============================================================ -->
+    <select id="countHistoryByUserId" resultType="int">
+        SELECT COUNT(*)
+        FROM tb_recognition
+        WHERE user_id = #{userId}
+    </select>
+
+</mapper>

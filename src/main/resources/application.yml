@@ -11,6 +11,7 @@ spring:
   mvc:
     pathmatch:
       matching-strategy: ant_path_matcher
+
   # 数据源配置
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
@@ -26,6 +27,8 @@ spring:
       validation-query: SELECT 1
 
   # 文件上传配置
+  # ⚠️ 星图识别使用 base64 JSON 传输（非 multipart），不受此限制
+  #    但 max-request-size 影响 JSON body 大小，50MB 足够（base64压缩图约300KB）
   servlet:
     multipart:
       enabled: true
@@ -40,7 +43,11 @@ spring:
 
 # MyBatis-Plus配置
 mybatis-plus:
-  mapper-locations: classpath:mapper/*.xml
+  # ⚠️ 重要：使用 ** 通配符扫描子目录
+  # 原配置 classpath:mapper/*.xml 只扫描 mapper/ 根目录，
+  # 无法扫描到 recognition 模块的 mapper/xml/RecognitionMapper.xml
+  # 改为 classpath:mapper/**/*.xml 后，所有层级的 XML 都能被加载
+  mapper-locations: classpath:mapper/**/*.xml
   type-aliases-package: com.astronomy.mall.module.*.entity
   configuration:
     map-underscore-to-camel-case: true
@@ -56,6 +63,15 @@ mybatis-plus:
 jwt:
   secret: astronomy-mall-secret-key-2024
   expire: 604800  # 7天(秒)
+
+# ============================================================
+# Astrometry.net API 配置 ← 4.1 新增
+# ============================================================
+astrometry:
+  # API Key（与账号绑定，上传的图片会出现在账号 Profile 页面，属正常现象）
+  api-key: svucokqxqvdbdfla
+  # API 基础路径（不含末尾斜杠）
+  base-url: https://nova.astrometry.net/api
 
 # Knife4j配置
 knife4j:
