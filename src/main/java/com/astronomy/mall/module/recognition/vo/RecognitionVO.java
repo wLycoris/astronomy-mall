@@ -18,10 +18,9 @@ import java.util.List;
  *   1 - 识别成功（可展示坐标/天体/标注图）
  *   2 - 识别失败（展示 failReason）
  *
- * 前端根据 status 决定页面展示逻辑:
- *   - status=0 → 继续轮询（4.2节实现）
- *   - status=1 → 跳转识别结果页
- *   - status=2 → 展示失败原因，提供重新上传按钮
+ * v4.3 新增:
+ *   - celestialObjects: 天体中英文对照列表 (GET /result/{id} 使用)
+ *   - raFormatted / decFormatted / orientationFormatted / radiusFormatted: 坐标格式化字符串
  */
 @Data
 public class RecognitionVO {
@@ -42,10 +41,18 @@ public class RecognitionVO {
     private String jobId;
 
     /**
-     * 识别到的天体列表
+     * 识别到的天体列表（英文原始名称）
      * 示例: ["Orion Nebula", "M42", "NGC 1976"]
      */
     private List<String> objectsInField;
+
+    /**
+     * 天体中英文对照列表
+     * 📌 v4.3新增 - GET /recognition/result/{id} 接口返回
+     * 格式: [{"en": "Orion Nebula", "zh": "猎户座大星云", "type": "nebula"}]
+     * 无中文名时 zh == en
+     */
+    private List<CelestialObjectVO> celestialObjects;
 
     /**
      * 机器标签列表
@@ -65,15 +72,42 @@ public class RecognitionVO {
     /** 视野半径（度） */
     private BigDecimal radius;
 
+    // =============================================
+    // v4.3 新增：坐标格式化字符串
+    // =============================================
+
+    /**
+     * 赤经格式化字符串
+     * 📌 v4.3新增 - 度数转时分秒，如 "05h 35m 17.3s"
+     */
+    private String raFormatted;
+
+    /**
+     * 赤纬格式化字符串
+     * 📌 v4.3新增 - 度数转度分秒，如 "-05° 23' 28.0\""
+     */
+    private String decFormatted;
+
+    /**
+     * 方向角格式化字符串
+     * 📌 v4.3新增 - 如 "178.50°"
+     */
+    private String orientationFormatted;
+
+    /**
+     * 视野半径格式化字符串
+     * 📌 v4.3新增 - ≥1° 显示度数；<1° 转为角分，如 "1.23°" 或 "27.0'"
+     */
+    private String radiusFormatted;
+
     /**
      * Astrometry.net 标注图片 URL
      * ⚠️ 前端直接用 img src 展示，无需额外处理
-     * 后端下载此 URL 时需要 Referer 请求头（AstrometryService 统一处理）
      */
     private String resultImageUrl;
 
     /**
-     * 推荐商品 ID 列表（由推荐模块填充，4.3节）
+     * 推荐商品 ID 列表（由推荐模块填充，4.4节）
      */
     private List<Long> recommendedProductIds;
 
@@ -83,4 +117,37 @@ public class RecognitionVO {
     /** 提交时间 */
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime createTime;
+
+    // =============================================
+    // v4.3 内部类：天体中英文对照
+    // =============================================
+
+    /**
+     * 天体中英文对照 VO
+     * 📌 v4.3新增 - 用于前端按类型渲染不同颜色的 Tag 标签
+     */
+    @Data
+    public static class CelestialObjectVO {
+
+        /** 英文名称（Astrometry 原始返回） */
+        private String en;
+
+        /**
+         * 中文名称（后端静态 Map 映射）
+         * 无匹配时与 en 相同
+         */
+        private String zh;
+
+        /**
+         * 天体类型（用于前端 Tag 颜色区分）
+         * 取值: nebula / galaxy / cluster / constellation / unknown
+         */
+        private String type;
+
+        public CelestialObjectVO(String en, String zh, String type) {
+            this.en   = en;
+            this.zh   = zh;
+            this.type = type;
+        }
+    }
 }
