@@ -1,0 +1,171 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!--
+    后台通知记录 Mapper XML
+    文件路径: resources/mapper/AdminNotificationMapper.xml
+    对应接口: com.astronomy.mall.module.admin.mapper.AdminNotificationMapper
+-->
+<mapper namespace="com.astronomy.mall.module.admin.mapper.AdminNotificationMapper">
+
+    <!-- ==================== 结果映射 ==================== -->
+
+    <!-- 通知记录 ResultMap（含用户信息） -->
+    <resultMap id="NotificationRecordVOMap" type="com.astronomy.mall.module.admin.vo.NotificationRecordVO">
+        <id     column="id"           property="id"/>
+        <result column="user_id"      property="userId"/>
+        <result column="username"     property="username"/>
+        <result column="nickname"     property="nickname"/>
+        <result column="module"       property="module"/>
+        <result column="type"         property="type"/>
+        <result column="title"        property="title"/>
+        <result column="content"      property="content"/>
+        <result column="related_id"   property="relatedId"/>
+        <result column="related_type" property="relatedType"/>
+        <result column="jump_url"     property="jumpUrl"/>
+        <result column="is_read"      property="isRead"/>
+        <result column="read_time"    property="readTime"/>
+        <result column="priority"     property="priority"/>
+        <result column="create_time"  property="createTime"/>
+    </resultMap>
+
+    <!-- ==================== 分页查询 ==================== -->
+
+    <!--
+        分页查询通知记录
+        LEFT JOIN tb_user 获取用户名、昵称
+        WHERE n.deleted = 0 排除软删除数据
+    -->
+    <select id="selectNotificationPage" resultMap="NotificationRecordVOMap">
+        SELECT
+        n.id,
+        n.user_id,
+        u.username,
+        u.nickname,
+        n.module,
+        n.type,
+        n.title,
+        n.content,
+        n.related_id,
+        n.related_type,
+        n.jump_url,
+        n.is_read,
+        n.read_time,
+        n.priority,
+        n.create_time
+        FROM tb_notification n
+        LEFT JOIN tb_user u ON n.user_id = u.id
+        WHERE n.deleted = 0
+        <if test="dto.userId != null">
+            AND n.user_id = #{dto.userId}
+        </if>
+        <if test="dto.module != null and dto.module != ''">
+            AND n.module = #{dto.module}
+        </if>
+        <if test="dto.type != null and dto.type != ''">
+            AND n.type = #{dto.type}
+        </if>
+        <if test="dto.isRead != null">
+            AND n.is_read = #{dto.isRead}
+        </if>
+        <if test="dto.priority != null">
+            AND n.priority = #{dto.priority}
+        </if>
+        <if test="dto.keyword != null and dto.keyword != ''">
+            AND (n.title LIKE CONCAT('%', #{dto.keyword}, '%')
+            OR n.content LIKE CONCAT('%', #{dto.keyword}, '%'))
+        </if>
+        <if test="dto.startTime != null">
+            AND n.create_time &gt;= #{dto.startTime}
+        </if>
+        <if test="dto.endTime != null">
+            AND n.create_time &lt;= #{dto.endTime}
+        </if>
+        ORDER BY n.create_time DESC
+    </select>
+
+    <!-- ==================== 统计分析 ==================== -->
+
+    <!--
+        各模块通知分布
+        只统计未删除数据，用于饼图
+    -->
+    <select id="selectModuleStats"
+            resultType="com.astronomy.mall.module.admin.vo.NotificationStatsVO$ModuleStatItem">
+        SELECT
+            module,
+            COUNT(*) AS count
+        FROM tb_notification
+        WHERE deleted = 0
+        GROUP BY module
+        ORDER BY count DESC
+    </select>
+
+    <!--
+        近30天每日发送量
+        DATE_FORMAT 格式化为 MM-dd，方便前端展示
+        用于柱状图
+    -->
+    <select id="selectDateStats"
+            resultType="com.astronomy.mall.module.admin.vo.NotificationStatsVO$DateStatItem">
+        SELECT
+            DATE_FORMAT(create_time, '%m-%d') AS date,
+            COUNT(*) AS count
+        FROM tb_notification
+        WHERE deleted = 0
+          AND create_time &gt;= DATE_SUB(NOW(), INTERVAL 30 DAY)
+        GROUP BY DATE(create_time)
+        ORDER BY DATE(create_time) ASC
+    </select>
+
+    <!--
+        通知类型 Top10 分布
+        用于辅助统计展示
+    -->
+    <select id="selectTypeStats"
+            resultType="com.astronomy.mall.module.admin.vo.NotificationStatsVO$TypeStatItem">
+        SELECT
+            type,
+            COUNT(*) AS count
+        FROM tb_notification
+        WHERE deleted = 0
+        GROUP BY type
+        ORDER BY count DESC
+            LIMIT 10
+    </select>
+
+    <!--
+        汇总数量统计（总数、已读、未读、今日、本月）
+        一次查询返回全部指标，减少数据库往返
+    -->
+    <select id="selectCountSummary" resultType="java.util.HashMap">
+        SELECT
+            COUNT(*)                                          AS totalCount,
+            SUM(CASE WHEN is_read = 1 THEN 1 ELSE 0 END)    AS readCount,
+            SUM(CASE WHEN is_read = 0 THEN 1 ELSE 0 END)    AS unreadCount,
+            SUM(CASE WHEN DATE(create_time) = CURDATE()
+                THEN 1 ELSE 0 END)                 AS todayCount,
+            SUM(CASE WHEN YEAR(create_time)  = YEAR(NOW())
+                      AND MONTH(create_time) = MONTH(NOW())
+                          THEN 1 ELSE 0 END)                 AS monthCount
+        FROM tb_notification
+        WHERE deleted = 0
+    </select>
+
+    <!-- ==================== 批量删除 ==================== -->
+
+    <!--
+        批量逻辑删除（软删除）
+        将指定ID列表的 deleted 字段设为 1
+    -->
+    <update id="batchLogicDelete">
+        UPDATE tb_notification
+        SET deleted = 1
+        WHERE id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </update>
+
+</mapper>
