@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!--
+    系统公告 Mapper XML
+    对应 Mapper 接口: com.astronomy.mall.module.admin.mapper.AdminAnnouncementMapper
+
+    📌 核心设计:
+    公告通过 GROUP BY n.related_id 从 tb_notification 表聚合得到。
+    同一次公告的所有通知共享相同的 related_id（公告分组ID）。
+
+    筛选条件（固定）:
+      n.module = 'system'
+      n.type = 'announcement'
+      n.related_type = 'announcement'
+      n.deleted = 0
+
+    📌 优先级筛选说明:
+    priority 是聚合字段（同一公告所有通知的 priority 值相同），
+    不能在 WHERE 里直接过滤（WHERE 在 GROUP BY 之前执行），
+    必须用 HAVING MIN(n.priority) = #{dto.priority} 在聚合后过滤。
+
+    文件路径: resources/mapper/AdminAnnouncementMapper.xml
+-->
+<mapper namespace="com.astronomy.mall.module.admin.mapper.AdminAnnouncementMapper">
+
+    <!-- ============================================================ -->
+    <!-- ResultMap: 公告VO                                             -->
+    <!-- ============================================================ -->
+    <resultMap id="AnnouncementVOMap" type="com.astronomy.mall.module.admin.vo.AnnouncementVO">
+        <result column="announcement_id" property="announcementId"/>
+        <result column="title"           property="title"/>
+        <result column="content"         property="content"/>
+        <result column="priority"        property="priority"/>
+        <result column="priority_text"   property="priorityText"/>
+        <result column="send_count"      property="sendCount"/>
+        <result column="read_count"      property="readCount"/>
+        <result column="read_rate"       property="readRate"/>
+        <result column="create_time"     property="createTime"/>
+    </resultMap>
+
+    <!-- ============================================================ -->
+    <!-- 公共 WHERE 片段（GROUP BY 之前的行级过滤）                      -->
+    <!-- ⚠️ priority 不在这里过滤，priority 是聚合字段，必须用 HAVING    -->
+    <!-- ============================================================ -->
+    <sql id="baseWhere">
+        WHERE n.module = 'system'
+        AND n.type = 'announcement'
+        AND n.related_type = 'announcement'
+        AND n.deleted = 0
+        <if test="dto.keyword != null and dto.keyword != ''">
+            AND n.title LIKE CONCAT('%', #{dto.keyword}, '%')
+        </if>
+        <if test="dto.startTime != null and dto.startTime != ''">
+            AND n.create_time &gt;= #{dto.startTime}
+        </if>
+        <if test="dto.endTime != null and dto.endTime != ''">
+            AND n.create_time &lt;= #{dto.endTime}
+        </if>
+    </sql>
+
+    <!-- ============================================================ -->
+    <!-- 公共 HAVING 片段（GROUP BY 之后的聚合过滤）                     -->
+    <!-- priority 必须在这里过滤                                        -->
+    <!-- ============================================================ -->
+    <sql id="baseHaving">
+        <if test="dto.priority != null">
+            HAVING MIN(n.priority) = #{dto.priority}
+        </if>
+    </sql>
+
+    <!-- ============================================================ -->
+    <!-- 核心 SELECT 字段（GROUP BY 聚合）                               -->
+    <!-- ============================================================ -->
+    <sql id="selectFields">
+        n.related_id                                                            AS announcement_id,
+        MIN(n.title)                                                            AS title,
+        MIN(n.content)                                                          AS content,
+        MIN(n.priority)                                                         AS priority,
+        CASE MIN(n.priority)
+            WHEN 0 THEN '普通'
+            WHEN 1 THEN '重要'
+            WHEN 2 THEN '紧急'
+            ELSE '普通'
+        END                                                                     AS priority_text,
+        COUNT(*)                                                                AS send_count,
+        SUM(n.is_read)                                                          AS read_count,
+        ROUND(SUM(n.is_read) * 100.0 / COUNT(*), 1)                            AS read_rate,
+        MIN(n.create_time)                                                      AS create_time
+    </sql>
+
+    <!-- ============================================================ -->
+    <!-- 1. 分页查询公告列表                                             -->
+    <!-- ============================================================ -->
+    <select id="selectAnnouncementPage" resultMap="AnnouncementVOMap">
+        SELECT
+        <include refid="selectFields"/>
+        FROM tb_notification n
+        <include refid="baseWhere"/>
+        GROUP BY n.related_id
+        <include refid="baseHaving"/>
+        ORDER BY MIN(n.create_time) DESC
+        LIMIT #{offset}, #{limit}
+    </select>
+
+    <!-- ============================================================ -->
+    <!-- 2. 查询公告总数                                                 -->
+    <!-- ⚠️ 有 HAVING 时必须再套一层子查询，否则 COUNT(*) 统计的是行数    -->
+    <!-- ============================================================ -->
+    <select id="countAnnouncements" resultType="long">
+        SELECT COUNT(*) FROM (
+        SELECT n.related_id
+        FROM tb_notification n
+        <include refid="baseWhere"/>
+        GROUP BY n.related_id
+        <include refid="baseHaving"/>
+        ) t
+    </select>
+
+    <!-- ============================================================ -->
+    <!-- 3. 查询单个公告详情（通过 related_id）                           -->
+    <!-- ============================================================ -->
+    <select id="selectAnnouncementById" resultMap="AnnouncementVOMap">
+        SELECT
+        <include refid="selectFields"/>
+        FROM tb_notification n
+        WHERE n.related_id = #{announcementId}
+        AND n.module = 'system'
+        AND n.type = 'announcement'
+        AND n.related_type = 'announcement'
+        AND n.deleted = 0
+        GROUP BY n.related_id
+        LIMIT 1
+    </select>
+
+    <!-- ============================================================ -->
+    <!-- 4. 软删除公告                                                   -->
+    <!-- ============================================================ -->
+    <update id="softDeleteAnnouncement">
+        UPDATE tb_notification
+        SET deleted = 1
+        WHERE related_id = #{announcementId}
+          AND module = 'system'
+          AND type = 'announcement'
+          AND related_type = 'announcement'
+          AND deleted = 0
+    </update>
+
+    <!-- ============================================================ -->
+    <!-- 5. 查询所有活跃用户ID（用于批量发送公告）                         -->
+    <!-- ============================================================ -->
+    <select id="selectAllActiveUserIds" resultType="long">
+        SELECT id
+        FROM tb_user
+        WHERE status = 1
+          AND deleted = 0
+        ORDER BY id ASC
+    </select>
+
+</mapper>

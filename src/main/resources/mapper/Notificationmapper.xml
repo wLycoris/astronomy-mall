@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.astronomy.mall.module.notification.mapper.NotificationMapper">
+
+    <!-- 统计各模块未读数量 -->
+    <select id="countUnreadByModule" resultType="java.util.Map">
+        SELECT
+            module,
+            COUNT(*) AS count
+        FROM tb_notification
+        WHERE user_id = #{userId}
+          AND is_read = 0
+        GROUP BY module
+    </select>
+
+    <!-- 批量插入通知（用于系统公告批量发送） -->
+    <insert id="insertBatch" parameterType="java.util.List">
+        INSERT INTO tb_notification
+        (user_id, module, type, title, content, jump_url,
+        related_id, related_type, priority, is_read, deleted, create_time)
+        VALUES
+        <foreach collection="list" item="n" separator=",">
+            (#{n.userId}, #{n.module}, #{n.type}, #{n.title}, #{n.content}, #{n.jumpUrl},
+            #{n.relatedId}, #{n.relatedType}, #{n.priority}, #{n.isRead}, #{n.deleted}, #{n.createTime})
+        </foreach>
+    </insert>
+
+    <!-- 根据 related_id 查公告内容（用户端公告详情页） -->
+    <!--
+        取一条即可，同一次公告的所有通知 title/content/priority 完全相同。
+        不加 user_id 条件，允许任何登录用户查看公告内容（不局限于收到通知的用户）。
+    -->
+    <select id="selectAnnouncementByRelatedId" resultType="java.util.Map">
+        SELECT
+            title,
+            content,
+            priority,
+            create_time AS createTime
+        FROM tb_notification
+        WHERE related_id    = #{relatedId}
+          AND type          = 'announcement'
+          AND related_type  = 'announcement'
+          AND deleted       = 0
+            LIMIT 1
+    </select>
+
+</mapper>

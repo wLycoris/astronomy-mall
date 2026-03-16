@@ -347,6 +347,11 @@ public class NotificationServiceImpl implements NotificationService {
         return setting == null || setting.getEnabled() == 1;
     }
 
+    @Override
+    public Map<String, Object> getAnnouncementDetail(Long relatedId) {
+        return notificationMapper.selectAnnouncementByRelatedId(relatedId);
+    }
+
     /**
      * 替换模板变量
      * @param template 模板字符串

@@ -10,6 +10,7 @@ import com.astronomy.mall.module.notification.vo.UnreadCountVO;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 通知服务接口
@@ -86,4 +87,11 @@ public interface NotificationService {
      * @return true-接收 false-不接收
      */
     boolean isNotificationEnabled(Long userId, String module, String type);
+
+    /**
+     * 根据公告分组ID查询公告详情（用户端公告详情页使用）
+     * @param relatedId 公告分组ID（即 tb_notification.related_id）
+     * @return 包含 title/content/priority/createTime 的 Map，不存在时返回 null
+     */
+    Map<String, Object> getAnnouncementDetail(Long relatedId);
 }

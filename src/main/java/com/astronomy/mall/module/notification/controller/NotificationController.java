@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.*;
 
 import javax.validation.Valid;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 消息通知控制器
@@ -109,5 +110,20 @@ public class NotificationController {
         Long userId = UserContext.getUserId();
         notificationService.updateUserSettings(userId, dto);
         return Result.success();
+    }
+
+    /**
+     * 公告详情（用户端，供 /notice/detail?id=xxx 页面调用）
+     * 根据 announcementGroupId（即 related_id）查询公告标题和内容
+     * 不校验 userId，任何登录用户均可查看
+     */
+    @GetMapping("/announcement/{id}")
+    @ApiOperation("公告详情（用户端）")
+    public Result<Map<String, Object>> getAnnouncementDetail(@PathVariable Long id) {
+        Map<String, Object> detail = notificationService.getAnnouncementDetail(id);
+        if (detail == null) {
+            throw new BusinessException("公告不存在或已被删除");
+        }
+        return Result.success(detail);
     }
 }
