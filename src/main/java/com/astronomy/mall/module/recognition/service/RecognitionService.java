@@ -1,6 +1,7 @@
 package com.astronomy.mall.module.recognition.service;
 
 import com.astronomy.mall.module.recognition.dto.SubmitRecognitionDTO;
+import com.astronomy.mall.module.recognition.vo.RecognitionStatsVO;
 import com.astronomy.mall.module.recognition.vo.RecognitionVO;
 
 import java.util.Map;
@@ -11,6 +12,7 @@ import java.util.Map;
  * 📌 v4.1 新增: submit, getStatus
  * 📌 v4.2 新增: getDetail, getHistory
  * 📌 v4.3 新增: getResult（含中英文天体名称映射 + 坐标格式化）
+ * 📌 v4.5 新增: deleteRecord, getStats；getHistory 新增 status 筛选参数
  */
 public interface RecognitionService {
 
@@ -56,12 +58,16 @@ public interface RecognitionService {
     /**
      * 查询用户历史识别记录（分页）
      *
+     * 📌 v4.5 升级: 新增 status 参数，null = 全部，0 = 识别中，1 = 成功，2 = 失败
+     *              返回的 VO 额外附加 hasImage / mainObjects 字段
+     *
      * @param userId   当前用户 ID
      * @param pageNum  页码（从 1 开始）
      * @param pageSize 每页数量（默认 10）
-     * @return Map 含 list（记录列表）和 total（总数）
+     * @param status   状态筛选，传 null 则查全部
+     * @return Map 含 list（RecognitionVO 列表）/ total / pageNum / pageSize
      */
-    Map<String, Object> getHistory(Long userId, int pageNum, int pageSize);
+    Map<String, Object> getHistory(Long userId, int pageNum, int pageSize, Integer status);
 
     // ============================================================
     // v4.3 新增方法
@@ -81,4 +87,28 @@ public interface RecognitionService {
      * @return 完整格式化识别结果 VO
      */
     RecognitionVO getResult(Long recognitionId, Long userId);
+
+    // ============================================================
+    // v4.5 新增方法
+    // ============================================================
+
+    /**
+     * 删除单条识别记录
+     * 📌 v4.5新增 - 对应 DELETE /api/recognition/{id}
+     *
+     * 校验: 记录必须属于当前用户，否则抛 FORBIDDEN 异常
+     *
+     * @param recognitionId 识别记录 ID
+     * @param userId        当前用户 ID（鉴权）
+     */
+    void deleteRecord(Long recognitionId, Long userId);
+
+    /**
+     * 获取用户识别统计
+     * 📌 v4.5新增 - 对应 GET /api/recognition/stats
+     *
+     * @param userId 当前用户 ID
+     * @return RecognitionStatsVO { total, successCount, failCount, pendingCount, successRate }
+     */
+    RecognitionStatsVO getStats(Long userId);
 }

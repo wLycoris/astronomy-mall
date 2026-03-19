@@ -5,6 +5,7 @@ import com.astronomy.mall.module.recognition.dto.SubmitRecognitionDTO;
 import com.astronomy.mall.module.recognition.service.RecognitionRecommendService;
 import com.astronomy.mall.module.recognition.service.RecognitionService;
 import com.astronomy.mall.module.recognition.vo.RecognitionProductVO;
+import com.astronomy.mall.module.recognition.vo.RecognitionStatsVO;
 import com.astronomy.mall.module.recognition.vo.RecognitionVO;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
@@ -21,21 +22,23 @@ import java.util.Map;
 /**
  * AI星图识别 Controller
  *
- * 接口列表 (共6个):
- *   POST /api/recognition/submit           提交识别任务（4.1）
- *   GET  /api/recognition/status/{id}      查询识别状态（4.1，等待页轮询）
- *   GET  /api/recognition/history          用户历史记录（4.2）
- *   GET  /api/recognition/result/{id}      完整识别结果（4.3，含中英文天体+坐标格式化）
- *   GET  /api/recognition/recommend/{id}   器材推荐（4.4⭐新增）
- *   GET  /api/recognition/{id}             识别详情（4.2，基础版）
+ * 接口列表 (共8个):
+ *   POST   /api/recognition/submit           提交识别任务（4.1）
+ *   GET    /api/recognition/status/{id}      查询识别状态（4.1，等待页轮询）
+ *   GET    /api/recognition/history          用户历史记录（4.2/4.5升级，支持 status 筛选）
+ *   GET    /api/recognition/stats            识别统计（4.5⭐新增）
+ *   GET    /api/recognition/result/{id}      完整识别结果（4.3，含中英文天体+坐标格式化）
+ *   GET    /api/recognition/recommend/{id}   器材推荐（4.4）
+ *   GET    /api/recognition/{id}             识别详情（4.2，基础版）
+ *   DELETE /api/recognition/{id}             删除单条记录（4.5⭐新增）
  *
  * 📌 鉴权: 所有接口需要 JWT
  *    userId 从 request attribute 中取（JwtInterceptor 解析后存入）
  *
  * ⚠️ 路由注册顺序说明:
- *    /status/{id}  和  /result/{id}  路径前缀不同，与 /{id} 无冲突
- *    /history      无路径参数，与 /{id} 无冲突
- *    Spring MVC 路径精确度优先，不受顺序影响，但保持从具体到抽象的排列顺序
+ *    /status/{id}、/result/{id}、/recommend/{id} 路径前缀不同，与 /{id} 无冲突
+ *    /history、/stats 无路径参数，Spring MVC 精确路径优先，与 /{id} 无冲突
+ *    保持从具体到抽象的排列顺序
  */
 @Slf4j
 @RestController
@@ -88,27 +91,58 @@ public class RecognitionController {
     }
 
     // ============================================================
-    // GET /api/recognition/history  用户历史记录 (4.2)
+    // GET /api/recognition/history  用户历史记录 (4.2 → 4.5升级)
     // ============================================================
 
     /**
-     * 查询当前用户的历史识别记录（分页）
+     * 查询当前用户的历史识别记录（分页 + 可选状态筛选）
      *
-     * ⚠️ 必须放在 /{id} 之前注册（虽然 Spring MVC 能区分，但显式保持顺序更清晰）
+     * 📌 v4.5 升级: 新增 status 参数（可选）
+     *   status=null  → 全部
+     *   status=0     → 识别中
+     *   status=1     → 识别成功
+     *   status=2     → 识别失败
      *
      * @param pageNum  页码（默认 1）
      * @param pageSize 每页数量（默认 10，最大 50）
-     * @return { list: RecognitionVO[], total: int, pageNum: int, pageSize: int }
+     * @param status   状态筛选（可选，不传则查全部）
+     * @return { list: RecognitionVO[], total: long, pageNum: int, pageSize: int }
      */
     @GetMapping("/history")
-    @ApiOperation("用户历史识别记录")
+    @ApiOperation("用户历史识别记录（支持状态筛选）")
     public Result<Map<String, Object>> getHistory(
             @ApiParam("页码") @RequestParam(defaultValue = "1") int pageNum,
             @ApiParam("每页数量") @RequestParam(defaultValue = "10") int pageSize,
+            @ApiParam("状态筛选：0-识别中 1-成功 2-失败，不传则查全部") @RequestParam(required = false) Integer status,
             HttpServletRequest request) {
         Long userId = (Long) request.getAttribute("userId");
-        Map<String, Object> result = recognitionService.getHistory(userId, pageNum, pageSize);
+        Map<String, Object> result = recognitionService.getHistory(userId, pageNum, pageSize, status);
         return Result.success(result);
+    }
+
+    // ============================================================
+    // ⭐ GET /api/recognition/stats  识别统计 (4.5 新增)
+    // ============================================================
+
+    /**
+     * 获取当前用户的识别统计
+     * 📌 v4.5新增 ⭐
+     *
+     * 返回: RecognitionStatsVO {
+     *   total,         // 总识别次数
+     *   successCount,  // 识别成功次数
+     *   failCount,     // 识别失败次数
+     *   pendingCount,  // 识别中次数
+     *   successRate    // 成功率（百分比，保留1位小数）
+     * }
+     *
+     * ⚠️ /stats 为精确路径，Spring MVC 优先于 /{id} 匹配，无需特殊处理
+     */
+    @GetMapping("/stats")
+    @ApiOperation("获取识别统计（总次数/成功率）")
+    public Result<RecognitionStatsVO> getStats(HttpServletRequest request) {
+        Long userId = (Long) request.getAttribute("userId");
+        return Result.success(recognitionService.getStats(userId));
     }
 
     // ============================================================
@@ -137,7 +171,7 @@ public class RecognitionController {
     }
 
     // ============================================================
-    // ⭐ GET /api/recognition/recommend/{id}  器材推荐 (4.4 新增)
+    // GET /api/recognition/recommend/{id}  器材推荐 (4.4)
     // ============================================================
 
     /**
@@ -164,8 +198,9 @@ public class RecognitionController {
 
     // ============================================================
     // GET /api/recognition/{id}  识别详情基础版 (4.2)
-    // ⚠️ 通配符路径必须放最后
+    // ⚠️ GET 通配符路径放最后
     // ============================================================
+
     @GetMapping("/{id}")
     @ApiOperation("获取识别详情（基础版）")
     public Result<RecognitionVO> getDetail(
@@ -174,5 +209,25 @@ public class RecognitionController {
         Long userId = (Long) request.getAttribute("userId");
         RecognitionVO vo = recognitionService.getDetail(id, userId);
         return Result.success(vo);
+    }
+
+    // ============================================================
+    // ⭐ DELETE /api/recognition/{id}  删除单条记录 (4.5 新增)
+    // ============================================================
+
+    /**
+     * 删除单条识别记录
+     * 📌 v4.5新增 ⭐
+     *
+     * 校验: 只能删除属于当前用户的记录，否则返回 403
+     */
+    @DeleteMapping("/{id}")
+    @ApiOperation("删除单条识别记录（只能删自己的）")
+    public Result<Void> deleteRecord(
+            @ApiParam("识别记录ID") @PathVariable Long id,
+            HttpServletRequest request) {
+        Long userId = (Long) request.getAttribute("userId");
+        recognitionService.deleteRecord(id, userId);
+        return Result.success(null);
     }
 }

@@ -8,7 +8,11 @@ import com.astronomy.mall.module.recognition.entity.Recognition;
 import com.astronomy.mall.module.recognition.mapper.RecognitionMapper;
 import com.astronomy.mall.module.recognition.service.RecognitionService;
 import com.astronomy.mall.module.recognition.service.external.AstrometryService;
+import com.astronomy.mall.module.recognition.vo.RecognitionStatsVO;
 import com.astronomy.mall.module.recognition.vo.RecognitionVO;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -22,6 +26,7 @@ import java.util.stream.Collectors;
  * 📌 v4.1: submit, getStatus
  * 📌 v4.2: getDetail, getHistory
  * 📌 v4.3: getResult（含中英文天体名称映射 + 坐标格式化）
+ * 📌 v4.5: deleteRecord, getStats；getHistory 升级支持 status 筛选 + 附加 hasImage/mainObjects
  *
  * v4.3 新增内容:
  *   - CELESTIAL_NAME_MAP  : 50+天体中英文静态映射表
@@ -209,28 +214,45 @@ public class RecognitionServiceImpl implements RecognitionService {
     }
 
     // ============================================================
-    // v4.2: getHistory（历史记录列表）
+    // v4.2 → v4.5 升级: getHistory（支持 status 筛选 + 附加历史列表字段）
     // ============================================================
 
     @Override
-    public Map<String, Object> getHistory(Long userId, int pageNum, int pageSize) {
+    public Map<String, Object> getHistory(Long userId, int pageNum, int pageSize, Integer status) {
         // 参数合法性修正
         if (pageNum < 1) pageNum = 1;
         if (pageSize < 1 || pageSize > 50) pageSize = 10;
 
-        int offset = (pageNum - 1) * pageSize;
+        // 使用 MyBatis-Plus 分页，支持可选 status 筛选
+        LambdaQueryWrapper<Recognition> wrapper = new LambdaQueryWrapper<Recognition>()
+                .eq(Recognition::getUserId, userId)
+                .eq(status != null, Recognition::getStatus, status)
+                .orderByDesc(Recognition::getCreateTime);
 
-        List<Recognition> records = recognitionMapper.selectHistoryByUserId(userId, offset, pageSize);
-        int total = recognitionMapper.countHistoryByUserId(userId);
+        IPage<Recognition> page = recognitionMapper.selectPage(new Page<>(pageNum, pageSize), wrapper);
 
-        List<RecognitionVO> voList = records.stream()
-                .map(this::convertToVO)
+        // 转 VO，附加历史列表专用字段（hasImage / mainObjects）
+        final int finalPageNum = pageNum;
+        List<RecognitionVO> voList = page.getRecords().stream()
+                .map(r -> {
+                    RecognitionVO vo = convertToVO(r);
+                    // ⭐ v4.5 附加字段: hasImage（是否有上传图片）
+                    vo.setHasImage(r.getImageData() != null && !r.getImageData().isEmpty());
+                    // ⭐ v4.5 附加字段: mainObjects（天体中文名列表）
+                    if (vo.getObjectsInField() != null) {
+                        List<String> mainObjects = vo.getObjectsInField().stream()
+                                .map(en -> CELESTIAL_NAME_MAP.getOrDefault(en, en))
+                                .collect(Collectors.toList());
+                        vo.setMainObjects(mainObjects);
+                    }
+                    return vo;
+                })
                 .collect(Collectors.toList());
 
         Map<String, Object> result = new HashMap<>();
         result.put("list", voList);
-        result.put("total", total);
-        result.put("pageNum", pageNum);
+        result.put("total", page.getTotal());
+        result.put("pageNum", finalPageNum);
         result.put("pageSize", pageSize);
         return result;
     }
@@ -276,6 +298,45 @@ public class RecognitionServiceImpl implements RecognitionService {
             vo.setRadiusFormatted(formatRadius(recognition.getRadius().doubleValue()));
         }
 
+        return vo;
+    }
+
+    // ============================================================
+    // ⭐ v4.5 新增: deleteRecord（删除单条记录）
+    // ============================================================
+
+    @Override
+    public void deleteRecord(Long recognitionId, Long userId) {
+        Recognition recognition = recognitionMapper.selectById(recognitionId);
+        checkOwnership(recognition, recognitionId, userId);
+        recognitionMapper.deleteById(recognitionId);
+        log.info("[Recognition] 用户 {} 删除识别记录 {}", userId, recognitionId);
+    }
+
+    // ============================================================
+    // ⭐ v4.5 新增: getStats（识别统计）
+    // ============================================================
+
+    @Override
+    public RecognitionStatsVO getStats(Long userId) {
+        // 只查 status 字段，避免加载 image_data 大字段
+        LambdaQueryWrapper<Recognition> wrapper = new LambdaQueryWrapper<Recognition>()
+                .eq(Recognition::getUserId, userId)
+                .select(Recognition::getStatus);
+
+        List<Recognition> all = recognitionMapper.selectList(wrapper);
+        int total        = all.size();
+        int successCount = (int) all.stream().filter(r -> Integer.valueOf(1).equals(r.getStatus())).count();
+        int failCount    = (int) all.stream().filter(r -> Integer.valueOf(2).equals(r.getStatus())).count();
+        int pendingCount = (int) all.stream().filter(r -> Integer.valueOf(0).equals(r.getStatus())).count();
+        double successRate = total > 0 ? Math.round(successCount * 1000.0 / total) / 10.0 : 0.0;
+
+        RecognitionStatsVO vo = new RecognitionStatsVO();
+        vo.setTotal(total);
+        vo.setSuccessCount(successCount);
+        vo.setFailCount(failCount);
+        vo.setPendingCount(pendingCount);
+        vo.setSuccessRate(successRate);
         return vo;
     }
 

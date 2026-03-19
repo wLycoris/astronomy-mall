@@ -21,6 +21,10 @@ import java.util.List;
  * v4.3 新增:
  *   - celestialObjects: 天体中英文对照列表 (GET /result/{id} 使用)
  *   - raFormatted / decFormatted / orientationFormatted / radiusFormatted: 坐标格式化字符串
+ *
+ * v4.5 新增:
+ *   - hasImage   : 是否有原始上传图片（历史列表使用）
+ *   - mainObjects: 主要天体中文名列表（历史列表使用）
  */
 @Data
 public class RecognitionVO {
@@ -117,6 +121,24 @@ public class RecognitionVO {
     /** 提交时间 */
     @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
     private LocalDateTime createTime;
+
+    // =============================================
+    // v4.5 新增：历史列表专用字段
+    // =============================================
+
+    /**
+     * 是否有原始上传图片
+     * 📌 v4.5新增 - 历史列表接口附加，前端据此显示缩略图占位图标
+     * true = imageData 字段非空
+     */
+    private Boolean hasImage;
+
+    /**
+     * 主要天体中文名列表
+     * 📌 v4.5新增 - 历史列表接口附加，来自 objectsInField 经 CELESTIAL_NAME_MAP 映射
+     * 示例: ["猎户座大星云", "猎户座"]
+     */
+    private List<String> mainObjects;
 
     // =============================================
     // v4.3 内部类：天体中英文对照
