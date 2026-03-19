@@ -18,6 +18,9 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  * 📌 重要说明:
  * - AdminInterceptor 必须在 JwtInterceptor 之后执行
  * - 因为需要从 request 中获取 JwtInterceptor 存入的 userId
+ *
+ * 📌 变更记录:
+ * - 2.7.1 新增 /api/nasa/** 白名单（NASA APOD 公开接口，商城首页无需登录调用）
  */
 @Configuration
 public class WebMvcConfig implements WebMvcConfigurer {
@@ -41,7 +44,9 @@ public class WebMvcConfig implements WebMvcConfigurer {
                         "/doc.html", "/swagger-resources/**",
                         "/v3/api-docs/**", "/webjars/**",
                         // 静态资源
-                        "/static/**", "/images/**"
+                        "/static/**", "/images/**",
+                        // 🆕 2.7.1 NASA API 公开接口（商城首页 ApodCard 无需登录）
+                        "/api/nasa/**"
                 )
                 .order(1); // 第一个执行
 
