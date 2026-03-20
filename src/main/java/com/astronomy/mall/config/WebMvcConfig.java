@@ -21,6 +21,8 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  *
  * 📌 变更记录:
  * - 2.7.1 新增 /api/nasa/** 白名单（NASA APOD 公开接口，商城首页无需登录调用）
+ * - 5.1 课程接口使用「可选认证」模式，由 JwtInterceptor.OPTIONAL_AUTH_LIST 处理
+ *   ⚠️ 不在 excludePathPatterns 中配置课程路径！否则拦截器不执行，进度无法记录
  */
 @Configuration
 public class WebMvcConfig implements WebMvcConfigurer {
@@ -45,8 +47,10 @@ public class WebMvcConfig implements WebMvcConfigurer {
                         "/v3/api-docs/**", "/webjars/**",
                         // 静态资源
                         "/static/**", "/images/**",
-                        // 🆕 2.7.1 NASA API 公开接口（商城首页 ApodCard 无需登录）
+                        // ✅ 2.7.1 NASA API 公开接口（商城首页 ApodCard 无需登录）
                         "/api/nasa/**"
+                        // ❌ 课程接口不在此处！由 JwtInterceptor.OPTIONAL_AUTH_LIST 处理
+                        // 游客放行 + 登录用户解析Token，两者兼顾
                 )
                 .order(1); // 第一个执行
 

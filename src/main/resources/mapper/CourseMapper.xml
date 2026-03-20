@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.astronomy.mall.module.course.mapper.CourseMapper">
+
+    <!-- ==================== 结果映射 ==================== -->
+    <resultMap id="CourseVOResultMap" type="com.astronomy.mall.module.course.vo.CourseVO">
+        <id column="id" property="id"/>
+        <result column="title" property="title"/>
+        <result column="subtitle" property="subtitle"/>
+        <result column="cover" property="cover"/>
+        <result column="type" property="type"/>
+        <result column="type_text" property="typeText"/>
+        <result column="difficulty" property="difficulty"/>
+        <result column="difficulty_text" property="difficultyText"/>
+        <result column="tags" property="tags"/>
+        <result column="chapter_count" property="chapterCount"/>
+        <result column="view_count" property="viewCount"/>
+        <result column="is_apod_course" property="isApodCourse"/>
+        <result column="is_mars_course" property="isMarsCourse"/>
+        <result column="is_favorite" property="isFavorite"/>
+        <result column="last_chapter_id" property="lastChapterId"/>
+    </resultMap>
+
+    <!-- ==================== 分页查询课程列表 ==================== -->
+    <!--
+        多标签AND筛选实现说明:
+        - tags 是 JSON 数组字符串，如 '["深空摄影","望远镜使用","月球"]'
+        - 使用 JSON_CONTAINS(c.tags, JSON_QUOTE(#{tag})) 判断某个 tag 是否在数组中
+        - 多个 tag 用 AND 连接，实现 AND 筛选（同时含所有选中标签）
+        - 使用 <foreach> 动态拼接多个 JSON_CONTAINS 条件
+        - 标签数组由 Java 层在调用前 split(",") 后传入，此处接受 List<String>
+
+        ⚠️ 注意:
+        - tags 参数在 Java 层传入时是 List<String>，通过 @Param("tagList") 绑定
+        - 此 XML 使用 #{item} 逐个引用
+        - MySQL 8.0+ 支持 JSON_CONTAINS，已确认使用 MySQL 8.0.33
+    -->
+    <select id="selectCoursePageWithFavorite" resultMap="CourseVOResultMap">
+        SELECT
+        c.id,
+        c.title,
+        c.subtitle,
+        c.cover,
+        c.type,
+        CASE c.type WHEN 0 THEN '视频课' WHEN 1 THEN '书本课' ELSE '未知' END AS type_text,
+        c.difficulty,
+        CASE c.difficulty WHEN 1 THEN '入门' WHEN 2 THEN '进阶' WHEN 3 THEN '高级' ELSE '未知' END AS difficulty_text,
+        c.tags,
+        c.chapter_count,
+        c.view_count,
+        c.is_apod_course,
+        c.is_mars_course,
+        <choose>
+            <when test="userId != null">
+                CASE WHEN cf.id IS NOT NULL THEN TRUE ELSE FALSE END AS is_favorite,
+                cp.last_chapter_id
+            </when>
+            <otherwise>
+                NULL AS is_favorite,
+                NULL AS last_chapter_id
+            </otherwise>
+        </choose>
+        FROM tb_course c
+        <if test="userId != null">
+            LEFT JOIN tb_course_favorite cf
+            ON cf.course_id = c.id AND cf.user_id = #{userId}
+            LEFT JOIN tb_course_progress cp
+            ON cp.course_id = c.id AND cp.user_id = #{userId}
+        </if>
+        <where>
+            c.deleted = 0
+            AND c.status = 1
+            <!-- 课程类型筛选 -->
+            <if test="dto.type != null">
+                AND c.type = #{dto.type}
+            </if>
+            <!-- 难度筛选 -->
+            <if test="dto.difficulty != null">
+                AND c.difficulty = #{dto.difficulty}
+            </if>
+            <!-- 关键词搜索（匹配标题） -->
+            <if test="dto.keyword != null and dto.keyword != ''">
+                AND c.title LIKE CONCAT('%', #{dto.keyword}, '%')
+            </if>
+            <!-- 多标签AND筛选：每个标签都必须在 JSON 数组中存在 -->
+            <if test="dto.tagList != null and dto.tagList.size() > 0">
+                <foreach collection="dto.tagList" item="tag" separator=" ">
+                    AND JSON_CONTAINS(c.tags, JSON_QUOTE(#{tag}))
+                </foreach>
+            </if>
+        </where>
+        ORDER BY c.sort DESC, c.create_time DESC
+    </select>
+
+</mapper>

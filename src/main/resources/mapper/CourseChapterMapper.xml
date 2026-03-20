@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.astronomy.mall.module.course.mapper.CourseChapterMapper">
+
+    <!-- ==================== 章节目录列表（不含正文）==================== -->
+    <!--
+        isCompleted 判断:
+        - completedChapters 是 JSON 数组字符串，如 "[1, 2, 5]"
+        - 使用 JSON_CONTAINS(#{completedChapters}, CAST(cc.id AS CHAR)) 判断 id 是否在完成列表中
+        - 若 completedChapters 为 null 或 '[]'，所有章节 isCompleted=false
+
+        ⚠️ MySQL JSON_CONTAINS 第二参数必须是 JSON 格式，整数需用 CAST AS JSON 或直接 CAST(id AS CHAR)
+        正确写法: JSON_CONTAINS('["1","2"]', JSON_QUOTE(CAST(cc.id AS CHAR)))
+        等价于:   JSON_CONTAINS('[1,2]', CAST(cc.id AS JSON))
+
+        为兼容性更好，这里用 FIND_IN_SET 方案会有逗号歧义问题，改用：
+        JSON_CONTAINS(#{completedChapters}, CAST(cc.id AS JSON))
+        此写法在 MySQL 8.0 中正确，chapter_id 是数字，JSON_CONTAINS('[1,2,3]', '1') = 1
+    -->
+    <select id="selectChapterOutlineList"
+            resultType="com.astronomy.mall.module.course.vo.CourseChapterVO">
+        SELECT
+            cc.id,
+            cc.course_id    AS courseId,
+            cc.title,
+            cc.type,
+            cc.sort,
+            cc.duration,
+            CASE
+                WHEN #{completedChapters} IS NOT NULL
+                    AND #{completedChapters} != '[]'
+                AND JSON_CONTAINS(#{completedChapters}, CAST(cc.id AS JSON))
+            THEN TRUE
+                ELSE FALSE
+        END AS isCompleted
+        FROM tb_course_chapter cc
+        WHERE cc.course_id = #{courseId}
+        ORDER BY cc.sort ASC
+    </select>
+
+</mapper>

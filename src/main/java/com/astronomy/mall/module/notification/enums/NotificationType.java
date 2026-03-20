@@ -44,6 +44,10 @@ public enum NotificationType {
     HOMEWORK_REVIEWED("homework_reviewed", "作业批改", NotificationModule.COURSE),
     CERTIFICATE_ISSUED("certificate_issued", "证书颁发", NotificationModule.COURSE),
     COURSE_EXPIRED("course_expired", "课程即将过期", NotificationModule.COURSE),
+    // 课程模块-新增 (3种)
+    COURSE_CHAPTER_ADDED("course_chapter_added", "课程新增章节",  NotificationModule.COURSE),
+    COURSE_APOD_UPDATED("course_apod_updated",   "APOD课程更新", NotificationModule.COURSE),
+    COURSE_COMPLETED("course_completed",          "课程学习完成", NotificationModule.COURSE),
 
     // ==================== 地理位置模块 (4种) ====================
     NEARBY_ACTIVITY("nearby_activity", "附近活动", NotificationModule.LOCATION),

@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -21,6 +22,9 @@ import java.util.Map;
  * 📌 2026-03-11 新增: sendRecyclingCompleteNotification     (2.5.3 二手回收款到账)
  * 📌 2026-03-16 新增: sendRecognitionCompletedNotification  (4.1 星图识别成功)
  * 📌 2026-03-16 新增: sendRecognitionFailedNotification     (4.1 星图识别失败)
+ * 📌 2026-03-20 新增: sendCourseChapterAddedNotification    (5.1 课程新增章节，批量)
+ * 📌 2026-03-20 新增: sendCourseApodUpdatedNotification     (5.1 NASA APOD同步，批量)
+ * 📌 2026-03-20 新增: sendCourseCompletedNotification       (5.1 课程学习完成，单条)
  */
 @Slf4j
 @Component
@@ -305,12 +309,6 @@ public class NotificationHelper {
      * 📌 通知模板: MALL_INSTALLATION_CONFIRMED
      * 📌 模板变量: engineerName / confirmedTime / engineerPhone
      * 📌 跳转路径: /after-sale/installation
-     *
-     * @param userId         接收通知的用户ID
-     * @param engineerName   工程师姓名
-     * @param confirmedTime  确认上门时间（已格式化字符串，如 "03月15日 14:00"）
-     * @param engineerPhone  工程师联系方式
-     * @param installationId 安装预约ID（related_id）
      */
     @Async
     public void sendInstallationConfirmedNotification(Long userId, String engineerName,
@@ -346,10 +344,6 @@ public class NotificationHelper {
      * 📌 通知模板: MALL_INSTALLATION_CANCELLED
      * 📌 模板变量: reason
      * 📌 跳转路径: /after-sale/installation
-     *
-     * @param userId         接收通知的用户ID
-     * @param reason         取消原因（adminRemark）
-     * @param installationId 安装预约ID（related_id）
      */
     @Async
     public void sendInstallationCancelledNotification(Long userId, String reason, Long installationId) {
@@ -378,14 +372,9 @@ public class NotificationHelper {
      * 发送二手回收款已到账通知
      *
      * 📌 触发时机: AdminRecyclingServiceImpl.completeRecycling() 标记已回收后调用
-     * 📌 通知模板: MALL_RECYCLING_COMPLETED (type = recycling_completed)
-     * 📌 模板变量: recycleNo(回收单号), amount(到账金额)
-     * 📌 跳转路径: /user/recycling (用户端我的回收列表)
-     *
-     * @param userId      接收通知的用户ID
-     * @param recycleNo   回收单号（如 RC20260311152300123）
-     * @param amount      到账金额（BigDecimal，自动格式化为两位小数）
-     * @param recyclingId 回收申请ID（related_id，用于前端跳转）
+     * 📌 通知模板: MALL_RECYCLING_COMPLETED
+     * 📌 模板变量: recycleNo / amount
+     * 📌 跳转路径: /user/recycling
      */
     @Async
     public void sendRecyclingCompleteNotification(Long userId, String recycleNo,
@@ -393,7 +382,6 @@ public class NotificationHelper {
         try {
             Map<String, Object> variables = new HashMap<>();
             variables.put("recycleNo", recycleNo);
-            // 金额格式化为两位小数，如 "88.00"
             variables.put("amount", amount.setScale(2, RoundingMode.HALF_UP).toPlainString());
 
             SendNotificationDTO dto = SendNotificationDTO.builder()
@@ -407,11 +395,9 @@ public class NotificationHelper {
                     .build();
 
             notificationService.sendNotification(dto);
-            log.info("二手回收款到账通知已发送: userId={}, recycleNo={}, amount={}",
-                    userId, recycleNo, amount);
+            log.info("二手回收款到账通知已发送: userId={}, recycleNo={}, amount={}", userId, recycleNo, amount);
         } catch (Exception e) {
-            log.error("发送二手回收款到账通知失败: userId={}, recycleNo={}, error={}",
-                    userId, recycleNo, e.getMessage(), e);
+            log.error("发送二手回收款到账通知失败: userId={}, recycleNo={}", userId, recycleNo, e);
         }
     }
 
@@ -422,12 +408,8 @@ public class NotificationHelper {
      *
      * 📌 触发时机: RecognitionPollScheduler.handleSuccess() 写入结果后
      * 📌 通知模板: AI_RECOGNITION_COMPLETED
-     * 📌 模板变量: objectNames（天体名称，多个用顿号拼接）/ recognitionId
+     * 📌 模板变量: objectNames / recognitionId
      * 📌 跳转路径: /recognition/result?id={recognitionId}
-     *
-     * @param userId        接收通知的用户ID
-     * @param objectNames   识别到的天体名称（已拼接好，如 "猎户座星云、M42"）
-     * @param recognitionId 识别记录ID
      */
     @Async
     public void sendRecognitionCompletedNotification(Long userId, String objectNames, Long recognitionId) {
@@ -456,14 +438,10 @@ public class NotificationHelper {
     /**
      * 发送星图识别失败通知
      *
-     * 📌 触发时机: RecognitionPollScheduler 标记失败（job failure 或超时）后
+     * 📌 触发时机: RecognitionPollScheduler 标记失败后
      * 📌 通知模板: AI_RECOGNITION_FAILED
-     * 📌 模板变量: failReason（失败原因）
-     * 📌 跳转路径: /recognition/history（历史列表，方便用户重新提交）
-     *
-     * @param userId        接收通知的用户ID
-     * @param failReason    失败原因
-     * @param recognitionId 识别记录ID
+     * 📌 模板变量: failReason
+     * 📌 跳转路径: /recognition/history
      */
     @Async
     public void sendRecognitionFailedNotification(Long userId, String failReason, Long recognitionId) {
@@ -536,6 +514,124 @@ public class NotificationHelper {
             notificationService.sendNotification(dto);
         } catch (Exception e) {
             log.error("发送账号安全通知失败", e);
+        }
+    }
+
+    // ==================== 课程模块通知 (3种) ====================
+
+    /**
+     * 通知1: 课程新增章节通知（批量发给收藏该课程的所有用户）
+     *
+     * 📌 触发时机: AdminCourseServiceImpl.addChapter() 成功后调用
+     * 📌 通知模板: COURSE_CHAPTER_ADDED (module=course, type=chapter_added)
+     * 📌 模板变量: courseTitle / chapterTitle / courseId
+     * 📌 跳转路径: /course/{courseId}
+     * 📌 发送对象: CourseFavoriteMapper.selectUserIdsByCourseId(courseId) 获取的收藏用户列表
+     *
+     * @param courseId        课程ID
+     * @param courseTitle     课程标题
+     * @param chapterTitle    新增章节标题
+     * @param favoriteUserIds 收藏该课程的用户ID列表（空时直接返回，不发通知）
+     */
+    @Async("notificationExecutor")
+    public void sendCourseChapterAddedNotification(Long courseId, String courseTitle,
+                                                   String chapterTitle,
+                                                   List<Long> favoriteUserIds) {
+        if (favoriteUserIds == null || favoriteUserIds.isEmpty()) return;
+        for (Long userId : favoriteUserIds) {
+            try {
+                Map<String, Object> variables = new HashMap<>();
+                variables.put("courseTitle",  courseTitle);
+                variables.put("chapterTitle", chapterTitle);
+                variables.put("courseId",     courseId.toString());
+
+                SendNotificationDTO dto = SendNotificationDTO.builder()
+                        .userId(userId)
+                        .module("course")
+                        .type("chapter_added")
+                        .relatedId(courseId)
+                        .relatedType("course")
+                        .priority(0)
+                        .variables(variables)
+                        .build();
+                notificationService.sendNotification(dto);
+            } catch (Exception e) {
+                log.error("发送课程章节更新通知失败 userId={} courseId={}", userId, courseId, e);
+            }
+        }
+    }
+
+    /**
+     * 通知2: NASA APOD定时同步成功通知（批量发给收藏APOD课的所有用户）
+     *
+     * 📌 触发时机: APODSyncScheduler.syncTodayApod() 成功插入新章节后调用
+     * 📌 通知模板: COURSE_APOD_UPDATED (module=course, type=apod_updated)
+     * 📌 模板变量: chapterTitle（今日APOD英文标题）/ courseId
+     * 📌 跳转路径: /course/{apodCourseId}
+     *
+     * @param apodCourseId    APOD课程ID（种子数据预置的固定课程）
+     * @param apodTitle       今日APOD标题（NASA返回的英文标题）
+     * @param favoriteUserIds 收藏APOD课程的用户ID列表
+     */
+    @Async("notificationExecutor")
+    public void sendCourseApodUpdatedNotification(Long apodCourseId, String apodTitle,
+                                                  List<Long> favoriteUserIds) {
+        if (favoriteUserIds == null || favoriteUserIds.isEmpty()) return;
+        for (Long userId : favoriteUserIds) {
+            try {
+                Map<String, Object> variables = new HashMap<>();
+                variables.put("chapterTitle", apodTitle);
+                variables.put("courseId",     apodCourseId.toString());
+
+                SendNotificationDTO dto = SendNotificationDTO.builder()
+                        .userId(userId)
+                        .module("course")
+                        .type("apod_updated")
+                        .relatedId(apodCourseId)
+                        .relatedType("course")
+                        .priority(0)
+                        .variables(variables)
+                        .build();
+                notificationService.sendNotification(dto);
+            } catch (Exception e) {
+                log.error("发送APOD课程更新通知失败 userId={}", userId, e);
+            }
+        }
+    }
+
+    /**
+     * 通知3: 课程学习完成通知（发给完课用户本人，单条）
+     *
+     * 📌 触发时机: CourseServiceImpl.checkCourseCompletion() 检测到完课时调用
+     * 📌 通知模板: COURSE_COMPLETED (module=course, type=completed)
+     * 📌 模板变量: courseTitle / courseId
+     * 📌 跳转路径: /course/{courseId}
+     * ⚠️ 调用方已排除 is_apod_course=1 和 is_mars_course=1 的课程，此处无需重复判断
+     *
+     * @param userId      完课用户ID
+     * @param courseId    课程ID
+     * @param courseTitle 课程标题
+     */
+    @Async("notificationExecutor")
+    public void sendCourseCompletedNotification(Long userId, Long courseId, String courseTitle) {
+        try {
+            Map<String, Object> variables = new HashMap<>();
+            variables.put("courseTitle", courseTitle);
+            variables.put("courseId",    courseId.toString());
+
+            SendNotificationDTO dto = SendNotificationDTO.builder()
+                    .userId(userId)
+                    .module("course")
+                    .type("completed")
+                    .relatedId(courseId)
+                    .relatedType("course")
+                    .priority(1)
+                    .variables(variables)
+                    .build();
+            notificationService.sendNotification(dto);
+            log.info("课程完成通知已发送 userId={} courseId={} title={}", userId, courseId, courseTitle);
+        } catch (Exception e) {
+            log.error("发送课程完成通知失败 userId={} courseId={}", userId, courseId, e);
         }
     }
 }

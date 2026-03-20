@@ -17,6 +17,13 @@ import java.util.List;
 /**
  * JWT拦截器
  * 用于验证用户登录状态
+ *
+ * 📌 三种路径处理模式:
+ * 1. WHITE_LIST         - 完全公开，不需要登录
+ * 2. OPTIONAL_AUTH_LIST - 可选认证：有Token就解析userId，没Token就放行（userId=null）
+ *                         用于"游客可访问，登录后有个性化内容"的接口
+ *                         ✅ 5.1 课程接口使用此模式，保证登录用户能记录学习进度
+ * 3. 其他路径           - 必须登录，Token无效直接401
  */
 @Component
 public class JwtInterceptor implements HandlerInterceptor {
@@ -46,7 +53,8 @@ public class JwtInterceptor implements HandlerInterceptor {
             "/api/product/new",
             "/api/review/list",
             "/api/review/statistics",
-
+            // NASA API 公开接口
+            "/api/nasa/",
             // Knife4j文档
             "/doc.html",
             "/swagger-resources",
@@ -54,29 +62,56 @@ public class JwtInterceptor implements HandlerInterceptor {
             "/webjars"
     );
 
+    /**
+     * 可选认证接口列表（有Token就解析设置userId，没Token就放行userId=null）
+     *
+     * 📌 5.1 课程模块：游客可看内容，登录后自动记录学习进度
+     * ⚠️ 必须从 WebMvcConfig.excludePathPatterns 中移除这些路径，
+     *    否则拦截器根本不执行，Token永远解析不到，进度永远记不上
+     */
+    private static final List<String> OPTIONAL_AUTH_LIST = Arrays.asList(
+            "/api/course/list",
+            "/api/course/chapter/",
+            "/api/course/"          // 匹配 /api/course/{id} 详情
+    );
+
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
         String requestURI = request.getRequestURI();
 
-        // 1. 检查是否在白名单中
+        // 1. 完全公开白名单：直接放行，不解析Token
         if (isWhiteList(requestURI)) {
             return true;
         }
 
-        // 2. 获取请求头中的token
+        // 2. 获取Token
         String token = request.getHeader("Authorization");
+        if (token != null && token.startsWith("Bearer ")) {
+            token = token.substring(7);
+        }
 
-        // 3. 如果token为空,抛出未登录异常
+        // 3. 可选认证路径：有Token就解析，没Token就放行（userId保持null）
+        if (isOptionalAuth(requestURI)) {
+            if (StrUtil.isNotBlank(token)) {
+                try {
+                    Long userId = jwtUtil.getUserIdFromToken(token);
+                    if (userId != null && !jwtUtil.isTokenExpired(token)) {
+                        request.setAttribute("userId", userId);
+                        UserContext.setUserId(userId);
+                    }
+                    // Token无效也不报错，当作未登录处理
+                } catch (Exception e) {
+                    // Token解析失败当作未登录，静默处理
+                }
+            }
+            return true;
+        }
+
+        // 4. 普通受保护接口：必须有有效Token
         if (StrUtil.isBlank(token)) {
             throw new BusinessException(ResultCode.UNAUTHORIZED);
         }
 
-        // 4. 去除 "Bearer " 前缀
-        if (token.startsWith("Bearer ")) {
-            token = token.substring(7);
-        }
-
-        // 5. 验证token
         try {
             Long userId = jwtUtil.getUserIdFromToken(token);
             if (userId == null) {
@@ -111,10 +146,22 @@ public class JwtInterceptor implements HandlerInterceptor {
     }
 
     /**
-     * 判断请求路径是否在白名单中
+     * 判断请求路径是否在完全公开白名单中
      */
     private boolean isWhiteList(String requestURI) {
         for (String pattern : WHITE_LIST) {
+            if (requestURI.startsWith(pattern)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 判断请求路径是否在可选认证列表中
+     */
+    private boolean isOptionalAuth(String requestURI) {
+        for (String pattern : OPTIONAL_AUTH_LIST) {
             if (requestURI.startsWith(pattern)) {
                 return true;
             }

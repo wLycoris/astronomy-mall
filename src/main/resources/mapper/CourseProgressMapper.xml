@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.astronomy.mall.module.course.mapper.CourseProgressMapper">
+
+    <!--
+        UPSERT 学习进度
+        使用 INSERT ... ON DUPLICATE KEY UPDATE 实现原子性
+        UNIQUE KEY uk_user_course (user_id, course_id) 触发 UPDATE 分支
+
+        ⚠️ completed_chapters 由 Java 层计算好后传入，此处直接覆盖
+        Java层逻辑:
+          1. 先查旧进度
+          2. 解析旧 completed_chapters JSON 数组
+          3. 若当前 chapterId 不在数组中则追加
+          4. 序列化为新 JSON 字符串传入此 SQL
+    -->
+    <insert id="upsertProgress">
+        INSERT INTO tb_course_progress
+        (user_id, course_id, last_chapter_id, completed_chapters, last_learn_time, create_time, update_time)
+        VALUES
+            (#{userId}, #{courseId}, #{chapterId}, #{completedChapters}, NOW(), NOW(), NOW())
+            ON DUPLICATE KEY UPDATE
+                                 last_chapter_id    = VALUES(last_chapter_id),
+                                 completed_chapters = VALUES(completed_chapters),
+                                 last_learn_time    = VALUES(last_learn_time),
+                                 update_time        = NOW()
+    </insert>
+
+</mapper>
