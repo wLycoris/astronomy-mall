@@ -533,7 +533,7 @@ public class NotificationHelper {
      * @param chapterTitle    新增章节标题
      * @param favoriteUserIds 收藏该课程的用户ID列表（空时直接返回，不发通知）
      */
-    @Async("notificationExecutor")
+    @Async
     public void sendCourseChapterAddedNotification(Long courseId, String courseTitle,
                                                    String chapterTitle,
                                                    List<Long> favoriteUserIds) {
@@ -573,7 +573,7 @@ public class NotificationHelper {
      * @param apodTitle       今日APOD标题（NASA返回的英文标题）
      * @param favoriteUserIds 收藏APOD课程的用户ID列表
      */
-    @Async("notificationExecutor")
+    @Async
     public void sendCourseApodUpdatedNotification(Long apodCourseId, String apodTitle,
                                                   List<Long> favoriteUserIds) {
         if (favoriteUserIds == null || favoriteUserIds.isEmpty()) return;
@@ -612,7 +612,7 @@ public class NotificationHelper {
      * @param courseId    课程ID
      * @param courseTitle 课程标题
      */
-    @Async("notificationExecutor")
+    @Async
     public void sendCourseCompletedNotification(Long userId, Long courseId, String courseTitle) {
         try {
             Map<String, Object> variables = new HashMap<>();
