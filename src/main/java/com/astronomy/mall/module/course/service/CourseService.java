@@ -5,12 +5,18 @@ import com.astronomy.mall.module.course.vo.CourseChapterVO;
 import com.astronomy.mall.module.course.vo.CourseVO;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 
+import java.util.List;
+
 /**
  * 课程 Service 接口
- * 对应用户端3个核心接口:
+ * 对应用户端接口:
  *   GET /api/course/list              → getCourseList
  *   GET /api/course/{id}              → getCourseDetail
  *   GET /api/course/chapter/{chId}    → getChapter（副作用: 记录进度）
+ *   POST/api/course/favorite/toggle/{id} → toggleFavorite
+ *   GET /api/course/favorite/list     → getMyFavoriteList
+ *   GET /api/course/history           → getMyHistory
+ *   GET /api/course/recommend         → getRecommendCourses（5.4新增）
  */
 public interface CourseService {
 
@@ -78,4 +84,30 @@ public interface CourseService {
      * @return 分页学习历史列表
      */
     IPage<CourseVO> getMyHistory(Long userId, Integer pageNum, Integer pageSize);
+
+    // ==================== 5.4 购买商品→推荐课程 ====================
+
+    /**
+     * 根据用户近3个月购买商品的标签推荐相关课程
+     *
+     * 推荐逻辑（7步兜底保障）:
+     *  Step 1: userId=null（未登录）      → 直接热门兜底
+     *  Step 2: 查近3个月非取消订单商品tags
+     *  Step 3: 无购买记录                → 热门兜底
+     *  Step 4: 解析商品 tags JSON        → Set 合并去重
+     *  Step 5: 合并后标签集为空          → 热门兜底
+     *  Step 6: LIKE 匹配 tb_course.tags（OR关系，命中任意tag即入选）
+     *  Step 7: 无命中课程               → 热门兜底
+     *  最终: 返回最多6个，已学习的课程自动排除
+     *
+     * 前端显示条件（CourseList.vue）:
+     *  v-if="getToken() && recommendList.length > 0"
+     *  → 未登录：前端不调用接口，区块不显示
+     *  → 已登录但接口返回空：区块不显示
+     *  → 已登录且有数据：显示「为你推荐」横向滑动卡片
+     *
+     * @param userId 当前用户ID（null=未登录）
+     * @return 推荐课程列表，最多6个 CourseVO
+     */
+    List<CourseVO> getRecommendCourses(Long userId);
 }

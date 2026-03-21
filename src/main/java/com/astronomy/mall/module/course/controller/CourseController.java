@@ -14,42 +14,33 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
 import javax.servlet.http.HttpServletRequest;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
  * 天文课程 用户端 Controller
  *
- * 接口列表（5.1节 核心接口）:
- *   GET  /api/course/list                 课程列表（分页+多条件筛选）
- *   GET  /api/course/{id}                 课程详情（含章节目录）
- *   GET  /api/course/chapter/{chapterId}  章节内容（副作用：记录进度）
- *   POST /api/course/favorite/toggle/{id} 收藏/取消收藏（需登录）
- *   GET  /api/course/favorite/list        我的收藏列表（需登录）
- *   GET  /api/course/history              学习历史（需登录）
- *   GET  /api/course/{id}/reviews         评价列表（占位，本期返回空）
+ * 接口列表:
+ *   GET  /api/course/list                    课程列表（分页+多条件筛选）
+ *   GET  /api/course/{id}                    课程详情（含章节目录）
+ *   GET  /api/course/chapter/{chapterId}     章节内容（副作用：记录进度）
+ *   POST /api/course/favorite/toggle/{id}    收藏/取消收藏（需登录）
+ *   GET  /api/course/favorite/list           我的收藏列表（需登录）
+ *   GET  /api/course/history                 学习历史（需登录）
+ *   GET  /api/course/{id}/reviews            评价列表（占位，本期返回空）
+ *   GET  /api/course/recommend               推荐课程（5.4新增，可选认证）
  *
  * 📌 认证说明:
- * - 课程列表/详情: 无需登录，登录时附加 isFavorite/lastChapterId
- * - 章节内容: 无需登录（需登录才记录进度）
- * - 收藏/历史: 需要登录（JwtInterceptor 已全局拦截，此处直接从 request 取 userId）
+ * - 课程列表/详情/章节: 可选认证（登录时附加 isFavorite/lastChapterId）
+ * - 收藏/历史: 需要登录（Controller 层校验 userId != null）
+ * - 推荐课程: 可选认证（未登录返回热门兜底，登录返回个性化推荐）
  *
  * 📌 WebMvcConfig 说明:
- * 课程接口 /api/course/** 不在 JwtInterceptor 白名单中，所以：
- * - 登录用户：JwtInterceptor 会解析并设置 userId 到 request
- * - 未登录用户：JwtInterceptor 会返回401
- * 但课程列表/详情/章节需要未登录也可访问，所以需要在 WebMvcConfig 中添加例外：
- *   excludePathPatterns("/api/course/list", "/api/course/*", "/api/course/chapter/*")
- * 或者改为 Controller 层自己判断 userId 是否存在
- *
- * ⚠️ 需要在 WebMvcConfig.java JwtInterceptor 的 excludePathPatterns 中添加:
- *   "/api/course/list",
- *   "/api/course/*",
- *   "/api/course/chapter/*"
- * 使课程列表/详情/章节支持未登录访问，但登录用户携带Token时仍可获取个性化数据
- *
- * 推荐方案: JwtInterceptor 改为「可选认证」模式（Token存在则解析，不存在则跳过）
- * 此处 Controller 通过 request.getAttribute("userId") 获取，null表示未登录
+ * /api/course/** 已在 OPTIONAL_AUTH_LIST（可选认证列表）中，
+ * Token 存在则 JwtInterceptor 解析并 setAttribute("userId", ...)，
+ * Token 不存在则跳过，userId 为 null。
  */
 @Slf4j
 @RestController
@@ -127,6 +118,32 @@ public class CourseController {
         return Result.success(courseService.getChapter(chapterId, userId));
     }
 
+    // ==================== 5.4 推荐课程接口（可选认证）====================
+
+    /**
+     * 推荐课程（根据近3个月购买商品标签匹配，最多6个）
+     *
+     * 认证: 可选认证
+     *   - 未登录: 返回热门兜底（按 view_count 倒序前6），前端 getToken() 为空不显示区块
+     *   - 已登录且无购买记录: 返回热门兜底
+     *   - 已登录且有购买记录: 返回个性化推荐（标签匹配，排除已学习课程）
+     *
+     * 前端显示控制:
+     *   CourseList.vue 用 v-if="getToken() && recommendList.length > 0" 控制
+     *   未登录时前端根本不调用此接口，节省服务器资源
+     *
+     * @param request HttpServletRequest（由 JwtInterceptor 可选注入 userId）
+     * @return 推荐课程列表，最多6个 CourseVO
+     */
+    @GetMapping("/recommend")
+    @ApiOperation("推荐课程（基于购买商品标签，最多6个）")
+    public Result<List<CourseVO>> getRecommendCourses(HttpServletRequest request) {
+        // 可选认证：从 request 取 userId，未登录为 null
+        Long userId = getCurrentUserId(request);
+        List<CourseVO> list = courseService.getRecommendCourses(userId);
+        return Result.success(list);
+    }
+
     // ==================== 收藏接口（需登录）====================
 
     /**
@@ -192,6 +209,6 @@ public class CourseController {
     @ApiOperation("课程评价列表（占位）")
     public Result<?> getCourseReviews(@PathVariable Long id) {
         // 本期不开放评价功能，返回空列表占位
-        return Result.success(new java.util.ArrayList<>());
+        return Result.success(new ArrayList<>());
     }
 }

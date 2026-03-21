@@ -21,9 +21,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
+import java.time.LocalDateTime;
+import java.util.*;
 import java.util.stream.Collectors;
 
 /**
@@ -41,6 +40,11 @@ import java.util.stream.Collectors;
  *    供 CourseFavorite.vue 「继续学习/开始学习」按钮判断
  *
  * 4. fix: item.courseId → CourseVO.id（VO 主键字段名为 id 而非 courseId）
+ *
+ * 📌 v5.4 新增:
+ * 5. getRecommendCourses(userId)：
+ *    根据用户近3个月购买商品的 tags 匹配课程 tags 推荐课程。
+ *    7步兜底逻辑保障始终有结果，已学习的课程自动排除，最多返回6个。
  */
 @Slf4j
 @Service
@@ -351,6 +355,95 @@ public class CourseServiceImpl implements CourseService {
 
         resultPage.setRecords(vos);
         return resultPage;
+    }
+
+    // ============================== 5.4 推荐课程 ==============================
+
+    /**
+     * 根据用户近3个月购买商品的标签推荐相关课程
+     *
+     * 完整推荐流程（7步兜底保障任意情况下都有合理结果）:
+     *
+     * Step 1: userId=null（未登录）
+     *         → 直接返回热门6个（不暴露任何用户信息）
+     *
+     * Step 2: 查用户近3个月非取消订单(status!=4)中商品的 tags JSON 字符串列表
+     *         → 每条结果是一个商品的完整 tags JSON，如 '["深空摄影","望远镜使用"]'
+     *
+     * Step 3: 查询结果为空（近3个月无购买记录）
+     *         → 热门兜底，前端仍会显示推荐区块（展示热门），提升转化
+     *
+     * Step 4: 逐条解析 tags JSON 字符串 → 合并到 Set 去重
+     *         → 得到如 {"深空摄影", "望远镜使用", "赤道仪"} 的标签集合
+     *
+     * Step 5: 合并后标签集仍为空（tags字段全部解析失败/格式异常）
+     *         → 热门兜底
+     *
+     * Step 6: LIKE 匹配 tb_course.tags（OR关系，命中任意tag即入选）
+     *         → 同时排除已有 tb_course_progress 记录的课程
+     *         → 按 view_count 倒序，最多取6个
+     *
+     * Step 7: 匹配结果为空（没有课程含有用户购买商品的标签）
+     *         → 热门兜底
+     *
+     * @param userId 当前用户ID（null=未登录）
+     * @return 推荐课程列表，最多6个
+     */
+    @Override
+    public List<CourseVO> getRecommendCourses(Long userId) {
+        final int MAX_COUNT = 6;
+
+        // Step 1: 未登录 → 直接热门兜底
+        if (userId == null) {
+            log.debug("[CourseRecommend] 未登录用户，返回热门兜底");
+            return courseMapper.getHotCourses(null, MAX_COUNT);
+        }
+
+        // Step 2: 查近3个月已完成订单的商品 tags（排除已取消 status=4）
+        LocalDateTime since = LocalDateTime.now().minusMonths(3);
+        List<String> productTagsJsonList = courseMapper.getUserRecentOrderProductTags(userId, since);
+
+        // Step 3: 无购买记录 → 热门兜底
+        if (productTagsJsonList == null || productTagsJsonList.isEmpty()) {
+            log.info("[CourseRecommend] userId={} 近3个月无购买记录，走热门兜底", userId);
+            return courseMapper.getHotCourses(userId, MAX_COUNT);
+        }
+
+        // Step 4: 解析所有商品 tags JSON → 合并去重到 Set
+        Set<String> userTagSet = new LinkedHashSet<>();  // 保持插入顺序（便于日志观察）
+        for (String tagsJson : productTagsJsonList) {
+            if (!StringUtils.hasText(tagsJson)) continue;
+            try {
+                List<String> tags = JSON.parseArray(tagsJson, String.class);
+                if (tags != null) {
+                    userTagSet.addAll(tags);
+                }
+            } catch (Exception e) {
+                // tags JSON 格式异常时跳过该条，不影响整体推荐
+                log.warn("[CourseRecommend] tags JSON 解析失败，已跳过: {}", tagsJson);
+            }
+        }
+
+        // Step 5: 合并后无有效标签 → 热门兜底
+        if (userTagSet.isEmpty()) {
+            log.info("[CourseRecommend] userId={} 商品tags均为空或解析失败，走热门兜底", userId);
+            return courseMapper.getHotCourses(userId, MAX_COUNT);
+        }
+
+        log.info("[CourseRecommend] userId={} 从购买商品提取到标签: {}", userId, userTagSet);
+
+        // Step 6: LIKE 匹配课程（排除已学习，按 view_count 倒序）
+        List<String> tagList = new ArrayList<>(userTagSet);
+        List<CourseVO> recommended = courseMapper.getRecommendByTags(userId, tagList, MAX_COUNT);
+
+        // Step 7: 无命中 → 热门兜底
+        if (recommended == null || recommended.isEmpty()) {
+            log.info("[CourseRecommend] userId={} 标签 {} 无匹配课程，走热门兜底", userId, userTagSet);
+            return courseMapper.getHotCourses(userId, MAX_COUNT);
+        }
+
+        log.info("[CourseRecommend] userId={} 标签匹配到 {} 门课程", userId, recommended.size());
+        return recommended;
     }
 
     // ============================== 私有工具方法 ==============================
