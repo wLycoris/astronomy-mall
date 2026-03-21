@@ -29,11 +29,18 @@ import java.util.stream.Collectors;
 /**
  * 课程 Service 实现
  *
- * 📌 核心设计说明:
- * 1. 多标签AND筛选: Service层 split(",") 后存入 dto.tagList，Mapper XML用 foreach + JSON_CONTAINS
- * 2. 进度UPSERT: 使用 INSERT ... ON DUPLICATE KEY UPDATE，不需要先查后写（原子性）
- * 3. 完课检测: completed_chapters.size() >= chapter_count 且不是APOD/火星课，触发通知
- * 4. 收藏通知: 收藏列表在 NotificationHelper 中获取，此处只触发发送
+ * 📌 v5.3 修复说明:
+ * 1. getCourseDetail(): 登录用户进入详情页时调用 insertIgnoreVisit() 埋点，
+ *    保证课程出现在学习历史列表中（即使未点击任何章节，显示"未学习"状态）
+ *
+ * 2. getMyHistory(): 新增 lastChapterTitle（JOIN chapter表查名称）
+ *    和 completedCount（解析 completed_chapters JSON数组长度），
+ *    供 CourseHistory.vue 进度条和"上次学至"展示
+ *
+ * 3. getMyFavoriteList(): 新增 lastChapterId / lastChapterTitle / completedCount，
+ *    供 CourseFavorite.vue 「继续学习/开始学习」按钮判断
+ *
+ * 4. fix: item.courseId → CourseVO.id（VO 主键字段名为 id 而非 courseId）
  */
 @Slf4j
 @Service
@@ -79,9 +86,20 @@ public class CourseServiceImpl implements CourseService {
         // 2. 转为VO，填充基础信息
         CourseVO vo = buildCourseVO(course);
 
-        // 3. 查当前用户进度（获取 completedChapters 用于章节目录 isCompleted 标记）
+        // 3. 登录用户：埋点访问记录 + 查进度/收藏
         String completedChapters = null;
         if (userId != null) {
+            // ✅ v5.3 新增：INSERT IGNORE 建立访问记录
+            // 若已有进度则自动跳过，保证课程出现在学习历史（lastChapterId=null="未学习"）
+            try {
+                courseProgressMapper.insertIgnoreVisit(userId, courseId);
+            } catch (Exception e) {
+                // 埋点失败不影响详情返回，静默处理
+                log.warn("[CourseService] insertIgnoreVisit 失败 userId={} courseId={}: {}",
+                        userId, courseId, e.getMessage());
+            }
+
+            // 查进度
             CourseProgress progress = courseProgressMapper.selectOne(
                     new LambdaQueryWrapper<CourseProgress>()
                             .eq(CourseProgress::getUserId, userId)
@@ -92,17 +110,17 @@ public class CourseServiceImpl implements CourseService {
                 completedChapters = progress.getCompletedChapters();
             }
 
-            // 4. 查收藏状态
+            // 查收藏状态
             CourseFavorite favorite = courseFavoriteMapper.selectByUserAndCourse(userId, courseId);
             vo.setIsFavorite(favorite != null);
         }
 
-        // 5. 查章节目录（不含正文，含 isCompleted 标记）
+        // 4. 查章节目录（不含正文，含 isCompleted 标记）
         List<CourseChapterVO> chapters =
                 courseChapterMapper.selectChapterOutlineList(courseId, completedChapters);
         vo.setChapters(chapters);
 
-        // 6. 更新 view_count（异步或直接+1，此处简单直接更新）
+        // 5. view_count +1
         courseMapper.updateById(Course.builder().id(courseId)
                 .viewCount(course.getViewCount() + 1).build());
 
@@ -172,7 +190,7 @@ public class CourseServiceImpl implements CourseService {
 
             String newCompletedStr = completedArr.toJSONString();
 
-            // 执行 UPSERT
+            // 执行 UPSERT（覆盖 last_chapter_id + completed_chapters + last_learn_time）
             courseProgressMapper.upsertProgress(userId, courseId, chapterId, newCompletedStr);
 
             // 若本次是新完成（之前未完成），进行完课检测
@@ -190,24 +208,18 @@ public class CourseServiceImpl implements CourseService {
     /**
      * 完课检测
      * 条件: completed_chapters.size() >= course.chapter_count
-     * 排除: is_apod_course=1 或 is_mars_course=1 的课程（章节每天增加，永远无法"完课"）
-     *
-     * @param userId          用户ID
-     * @param courseId        课程ID
-     * @param completedCount  当前已完成章节数
+     * 排除: is_apod_course=1 或 is_mars_course=1（章节每天自动增加，永远无法完课）
      */
     private void checkCourseCompletion(Long userId, Long courseId, int completedCount) {
         Course course = courseMapper.selectById(courseId);
         if (course == null) return;
 
-        // 排除自动同步类课程
         boolean isAutoSyncCourse = (course.getIsApodCourse() != null && course.getIsApodCourse() == 1)
                 || (course.getIsMarsCourse() != null && course.getIsMarsCourse() == 1);
         if (isAutoSyncCourse) return;
 
         int totalChapters = course.getChapterCount() != null ? course.getChapterCount() : 0;
         if (totalChapters > 0 && completedCount >= totalChapters) {
-            // 触发完课通知（NotificationHelper @Async 异步发送，不阻塞当前请求）
             try {
                 notificationHelper.sendCourseCompletedNotification(userId, courseId, course.getTitle());
             } catch (Exception e) {
@@ -222,11 +234,9 @@ public class CourseServiceImpl implements CourseService {
     public boolean toggleFavorite(Long courseId, Long userId) {
         CourseFavorite existing = courseFavoriteMapper.selectByUserAndCourse(userId, courseId);
         if (existing != null) {
-            // 已收藏 → 取消
             courseFavoriteMapper.deleteById(existing.getId());
             return false;
         } else {
-            // 未收藏 → 收藏
             CourseFavorite favorite = new CourseFavorite();
             favorite.setUserId(userId);
             favorite.setCourseId(courseId);
@@ -235,9 +245,15 @@ public class CourseServiceImpl implements CourseService {
         }
     }
 
+    /**
+     * 我的课程收藏列表
+     *
+     * 📌 v5.3 修复：
+     * - 新增 lastChapterId / lastChapterTitle / completedCount 字段填充
+     *   （从 tb_course_progress 关联查询，供「继续学习/开始学习」判断）
+     */
     @Override
     public IPage<CourseVO> getMyFavoriteList(Long userId, Integer pageNum, Integer pageSize) {
-        // 查收藏的课程ID列表，再查课程详情
         Page<CourseFavorite> favPage = new Page<>(pageNum, pageSize);
         IPage<CourseFavorite> favList = courseFavoriteMapper.selectPage(favPage,
                 new LambdaQueryWrapper<CourseFavorite>()
@@ -245,20 +261,53 @@ public class CourseServiceImpl implements CourseService {
                         .orderByDesc(CourseFavorite::getCreateTime)
         );
 
-        // 转换为 CourseVO
         Page<CourseVO> resultPage = new Page<>(pageNum, pageSize);
         resultPage.setTotal(favList.getTotal());
+
         List<CourseVO> vos = favList.getRecords().stream().map(fav -> {
             Course course = courseMapper.selectById(fav.getCourseId());
             if (course == null || course.getDeleted() == 1) return null;
+
             CourseVO vo = buildCourseVO(course);
             vo.setIsFavorite(true);
+
+            // ✅ v5.3 新增：查学习进度，填充 lastChapterId / lastChapterTitle / completedCount
+            CourseProgress progress = courseProgressMapper.selectOne(
+                    new LambdaQueryWrapper<CourseProgress>()
+                            .eq(CourseProgress::getUserId, userId)
+                            .eq(CourseProgress::getCourseId, fav.getCourseId())
+            );
+            if (progress != null) {
+                vo.setLastChapterId(progress.getLastChapterId());
+                // 查章节标题
+                if (progress.getLastChapterId() != null) {
+                    CourseChapter lastChapter = courseChapterMapper.selectById(progress.getLastChapterId());
+                    if (lastChapter != null) {
+                        vo.setLastChapterTitle(lastChapter.getTitle());
+                    }
+                }
+                // 已完成章节数
+                vo.setCompletedCount(parseCompletedCount(progress.getCompletedChapters()));
+            } else {
+                vo.setCompletedCount(0);
+            }
+
             return vo;
         }).filter(java.util.Objects::nonNull).collect(Collectors.toList());
+
         resultPage.setRecords(vos);
         return resultPage;
     }
 
+    /**
+     * 我的学习历史
+     *
+     * 📌 v5.3 修复：
+     * - 新增 lastChapterTitle（JOIN chapter表查标题）
+     * - 新增 completedCount（解析 completed_chapters JSON数组长度）
+     * - lastChapterId=null 的记录同样返回（对应「浏览过但未学习」状态）
+     *   CourseHistory.vue 前端对 null 显示「未学习」badge
+     */
     @Override
     public IPage<CourseVO> getMyHistory(Long userId, Integer pageNum, Integer pageSize) {
         Page<CourseProgress> progressPage = new Page<>(pageNum, pageSize);
@@ -271,16 +320,35 @@ public class CourseServiceImpl implements CourseService {
 
         Page<CourseVO> resultPage = new Page<>(pageNum, pageSize);
         resultPage.setTotal(progressList.getTotal());
+
         List<CourseVO> vos = progressList.getRecords().stream().map(progress -> {
             Course course = courseMapper.selectById(progress.getCourseId());
             if (course == null || course.getDeleted() == 1) return null;
+
             CourseVO vo = buildCourseVO(course);
+
+            // ✅ v5.3 修复：填充完整进度信息
             vo.setLastChapterId(progress.getLastChapterId());
-            // 计算完成进度
+
+            // 查上次章节标题
+            if (progress.getLastChapterId() != null) {
+                CourseChapter lastChapter = courseChapterMapper.selectById(progress.getLastChapterId());
+                if (lastChapter != null) {
+                    vo.setLastChapterTitle(lastChapter.getTitle());
+                }
+            }
+            // lastChapterId=null → lastChapterTitle=null → 前端显示「未学习」
+
+            // 已完成章节数
+            vo.setCompletedCount(parseCompletedCount(progress.getCompletedChapters()));
+
+            // 收藏状态
             CourseFavorite fav = courseFavoriteMapper.selectByUserAndCourse(userId, course.getId());
             vo.setIsFavorite(fav != null);
+
             return vo;
         }).filter(java.util.Objects::nonNull).collect(Collectors.toList());
+
         resultPage.setRecords(vos);
         return resultPage;
     }
@@ -303,8 +371,8 @@ public class CourseServiceImpl implements CourseService {
         vo.setViewCount(course.getViewCount());
         vo.setIsApodCourse(course.getIsApodCourse());
         vo.setIsMarsCourse(course.getIsMarsCourse());
-        // 默认未收藏/未登录
         vo.setIsFavorite(false);
+        vo.setCompletedCount(0);
         return vo;
     }
 
@@ -322,6 +390,19 @@ public class CourseServiceImpl implements CourseService {
         vo.setSource(chapter.getSource());
         vo.setApodImage(chapter.getApodImage());
         return vo;
+    }
+
+    /**
+     * 解析 completed_chapters JSON 字符串，返回已完成章节数
+     * 兼容 null / 空字符串 / 格式错误情况
+     */
+    private int parseCompletedCount(String completedChapters) {
+        if (!StringUtils.hasText(completedChapters)) return 0;
+        try {
+            return JSON.parseArray(completedChapters).size();
+        } catch (Exception e) {
+            return 0;
+        }
     }
 
     private String getDifficultyText(Integer difficulty) {

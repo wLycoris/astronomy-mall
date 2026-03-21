@@ -9,6 +9,10 @@ import java.util.List;
  * 对应接口:
  * - GET /api/course/list   → 返回分页列表，不含章节
  * - GET /api/course/{id}  → 返回详情，含 chapters（不含正文）
+ *
+ * 📌 v5.3 新增字段:
+ * - lastChapterTitle: 上次学习章节标题（学习历史页 + 收藏页"继续学习"展示）
+ * - completedCount:   已完成章节数（学习历史进度条展示）
  */
 @Data
 public class CourseVO {
@@ -72,9 +76,23 @@ public class CourseVO {
     /**
      * 上次学习到的章节ID（需登录）
      * 用于「继续学习」按钮直接跳转
-     * null 表示从未学习或未登录
+     * null 表示浏览过但从未点击章节（"未学习"状态）或未登录
      */
     private Long lastChapterId;
+
+    /**
+     * 上次学习到的章节标题（需登录）
+     * 📌 v5.3 新增 — 学习历史页「上次学至：xxx章节」展示用
+     * null 表示未登录或从未点击章节
+     */
+    private String lastChapterTitle;
+
+    /**
+     * 已完成章节数（需登录）
+     * 📌 v5.3 新增 — 学习历史页进度条展示用（completedCount / chapterCount）
+     * 0 表示未开始学习
+     */
+    private Integer completedCount;
 
     // ========== 详情页专属字段（列表页不填充）==========
 
