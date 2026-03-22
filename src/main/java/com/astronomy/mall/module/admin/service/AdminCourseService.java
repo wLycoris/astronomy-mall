@@ -1,24 +1,110 @@
 package com.astronomy.mall.module.admin.service;
 
+import com.astronomy.mall.module.admin.dto.ApodSyncDTO;
+import com.astronomy.mall.module.admin.dto.ChapterCreateDTO;
+import com.astronomy.mall.module.admin.dto.CourseCreateDTO;
+import com.astronomy.mall.module.admin.vo.AdminCourseVO;
+import com.astronomy.mall.module.nasa.vo.ApodVO;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+
 import java.time.LocalDate;
+import java.util.List;
+import java.util.Map;
 
 /**
- * 管理员课程管理 Service 接口
+ * 后台课程管理 Service 接口
  *
- * 📌 当前实现（5.2）: 只包含 APOD 批量同步方法
- * 后续完整 AdminCourseController 开发时在此接口补充其余方法
+ * 11个管理员端接口对应的业务方法 + 1个内部方法（insertOneApodDay）
  */
 public interface AdminCourseService {
 
+    // ===================== 课程管理（5个）=====================
+
     /**
-     * 批量同步历史 APOD 数据到「NASA每日天文图片精选」课程
-     *
-     * 📌 由 APODSyncScheduler.syncApodRange() 实际执行
-     * 本方法作为 Service 层中转，方便后续扩展（如限流、权限校验、日志）
-     *
-     * @param startDate 开始日期（含）
-     * @param endDate   结束日期（含）
-     * @return 本次实际新增的章节数量
+     * 课程列表（分页 + 关键词 + type + status 筛选）
      */
-    int batchSyncApod(LocalDate startDate, LocalDate endDate);
+    Page<AdminCourseVO> getCourseList(Integer pageNum, Integer pageSize,
+                                      String keyword, Integer type, Integer status);
+
+    /**
+     * 新增课程（默认 status=0 草稿）
+     *
+     * @return 新课程 ID
+     */
+    Long addCourse(CourseCreateDTO dto);
+
+    /**
+     * 编辑课程基本信息
+     */
+    void updateCourse(Long id, CourseCreateDTO dto);
+
+    /**
+     * 删除课程（逻辑删除，deleted=1）
+     */
+    void deleteCourse(Long id);
+
+    /**
+     * 发布 / 下架课程（status 0↔1）
+     */
+    void updateCourseStatus(Long id, Integer status);
+
+    // ===================== 章节管理（5个）=====================
+
+    /**
+     * 获取课程章节列表（按 sort 升序）
+     */
+    List<AdminCourseVO.ChapterVO> getChapterList(Long courseId);
+
+    /**
+     * 新增章节
+     * 📌 成功后异步通知所有收藏该课程的用户
+     *
+     * @return 新章节 ID
+     */
+    Long addChapter(ChapterCreateDTO dto);
+
+    /**
+     * 编辑章节
+     */
+    void updateChapter(Long id, ChapterCreateDTO dto);
+
+    /**
+     * 删除章节（物理删除，同步将 tb_course.chapter_count - 1）
+     */
+    void deleteChapter(Long id);
+
+    /**
+     * 批量更新章节排序（拖拽排序）
+     *
+     * @param sortList [{id:1, sort:0}, {id:2, sort:1}, ...]
+     */
+    void sortChapters(List<Map<String, Object>> sortList);
+
+    // ===================== APOD 批量同步（1个）=====================
+
+    /**
+     * 手动触发 APOD 历史数据批量同步（入口，无事务）
+     *
+     * 每天通过 insertOneApodDay() 独立提交（REQUIRES_NEW），
+     * NASA API 500 只跳过当天，不影响其他天的已提交数据。
+     *
+     * @param dto 同步日期范围（单次 ≤ 60 天）
+     * @return 本次新增章节数量
+     */
+    int syncApodRange(ApodSyncDTO dto);
+
+    /**
+     * 单天 APOD 数据入库（独立事务 REQUIRES_NEW）
+     *
+     * 📌 此方法暴露在接口层，是为了让 Spring AOP 代理能够拦截到
+     *    @Transactional(REQUIRES_NEW)。
+     *    syncApodRange() 通过 self.insertOneApodDay() 调用（self = 代理对象）。
+     *
+     * ⚠️ 不建议在 syncApodRange() 以外的地方直接调用此方法。
+     *
+     * @param apodCourseId APOD 专属课程 ID
+     * @param date         当天日期
+     * @param apod         NASA APOD 数据
+     */
+    void insertOneApodDay(Long apodCourseId, LocalDate date, ApodVO apod);
 }

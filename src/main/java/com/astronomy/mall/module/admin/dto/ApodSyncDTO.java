@@ -12,28 +12,22 @@ import java.time.LocalDate;
  * 📌 对应接口: POST /api/admin/course/apod/sync
  *
  * 📌 使用场景:
- * - 首次部署时补充历史 APOD 数据
- * - 定时任务漏跑时手动补录
- * - 已存在的日期自动跳过（幂等）
- *
- * 📌 使用示例（Apifox/Postman）:
- * {
- *   "startDate": "2024-01-01",
- *   "endDate": "2024-01-31"
- * }
+ *   - 首次部署时补充历史 APOD 数据
+ *   - 定时任务漏跑时手动补录
+ *   - 已存在的日期自动跳过（幂等，可重复执行）
  *
  * ⚠️ 注意:
- * - 日期范围不能超过 90 天（避免 NASA API 超限）
- * - startDate 不能晚于 endDate
- * - NASA APOD 最早日期为 1995-06-16
+ *   - 日期范围不能超过 60 天（避免 NASA API 超限），超过请分批执行
+ *   - startDate 不能晚于 endDate
+ *   - endDate 不能晚于今天
+ *   - NASA APOD 最早日期为 1995-06-16
  */
 @Data
 public class ApodSyncDTO {
 
     /**
      * 开始日期（含）
-     * 格式: yyyy-MM-dd
-     * 例如: "2024-01-01"
+     * 格式: yyyy-MM-dd，例如 "2024-01-01"
      */
     @NotNull(message = "startDate 不能为空")
     @JsonFormat(pattern = "yyyy-MM-dd")
@@ -41,8 +35,7 @@ public class ApodSyncDTO {
 
     /**
      * 结束日期（含）
-     * 格式: yyyy-MM-dd
-     * 例如: "2024-01-31"
+     * 格式: yyyy-MM-dd，例如 "2024-01-31"
      */
     @NotNull(message = "endDate 不能为空")
     @JsonFormat(pattern = "yyyy-MM-dd")
