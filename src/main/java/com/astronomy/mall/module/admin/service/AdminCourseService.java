@@ -3,6 +3,7 @@ package com.astronomy.mall.module.admin.service;
 import com.astronomy.mall.module.admin.dto.ApodSyncDTO;
 import com.astronomy.mall.module.admin.dto.ChapterCreateDTO;
 import com.astronomy.mall.module.admin.dto.CourseCreateDTO;
+import com.astronomy.mall.module.admin.vo.AdminCourseReviewVO;
 import com.astronomy.mall.module.admin.vo.AdminCourseVO;
 import com.astronomy.mall.module.nasa.vo.ApodVO;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -15,6 +16,7 @@ import java.util.Map;
  * 后台课程管理 Service 接口
  *
  * 11个管理员端接口对应的业务方法 + 1个内部方法（insertOneApodDay）
+ * v5.6 新增2个评价管理方法: getCourseReviews / deleteCourseReview
  */
 public interface AdminCourseService {
 
@@ -107,4 +109,25 @@ public interface AdminCourseService {
      * @param apod         NASA APOD 数据
      */
     void insertOneApodDay(Long apodCourseId, LocalDate date, ApodVO apod);
+
+    // ===================== 5.6 课程评价（2个）=====================
+
+    /**
+     * 管理员端：课程评价列表（分页 + 多条件筛选）
+     *
+     * @param pageNum   页码
+     * @param pageSize  每页数量
+     * @param courseId  课程ID（null=全部）
+     * @param rating    星级（null或0=全部，1-5精确匹配）
+     * @param keyword   用户名/昵称关键词（null=不过滤）
+     */
+    Page<AdminCourseReviewVO> getCourseReviews(int pageNum, int pageSize,
+                                               Long courseId, Integer rating, String keyword);
+
+    /**
+     * 管理员端：逻辑删除课程评价（status 置为 0）
+     *
+     * @param id 评价ID
+     */
+    void deleteCourseReview(Long id);
 }

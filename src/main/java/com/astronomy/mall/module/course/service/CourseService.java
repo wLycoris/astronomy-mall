@@ -1,9 +1,12 @@
 package com.astronomy.mall.module.course.service;
 
 import com.astronomy.mall.module.course.dto.CourseQueryDTO;
+import com.astronomy.mall.module.course.dto.CourseReviewSubmitDTO;
 import com.astronomy.mall.module.course.vo.CourseChapterVO;
+import com.astronomy.mall.module.course.vo.CourseReviewVO;
 import com.astronomy.mall.module.course.vo.CourseVO;
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 
 import java.util.List;
 
@@ -17,6 +20,9 @@ import java.util.List;
  *   GET /api/course/favorite/list     → getMyFavoriteList
  *   GET /api/course/history           → getMyHistory
  *   GET /api/course/recommend         → getRecommendCourses（5.4新增）
+ *   POST /api/course/{id}/review      → submitCourseReview（5.6新增）
+ *   GET /api/course/{id}/reviews      → getCourseReviews（5.6新增）
+ *   GET /api/course/{id}/review/my    → getMyReview（5.6新增）
  */
 public interface CourseService {
 
@@ -110,4 +116,47 @@ public interface CourseService {
      * @return 推荐课程列表，最多6个 CourseVO
      */
     List<CourseVO> getRecommendCourses(Long userId);
+
+    // ==================== 5.6 课程评价 ====================
+
+    /**
+     * 提交课程评价
+     * 校验顺序: 课程存在 → 有学习进度 → 未重复评价
+     *
+     * @param courseId 课程ID
+     * @param userId   当前登录用户ID
+     * @param dto      评价内容（rating必传，content可选）
+     * @throws com.astronomy.mall.common.exception.BusinessException 课程不存在 / 未学习该课程 / 已评过
+     */
+    void submitCourseReview(Long courseId, Long userId, CourseReviewSubmitDTO dto);
+
+    /**
+     * 课程评价列表（用户端，分页，按时间倒序，只返回 status=1）
+     * GET /api/course/{courseId}/reviews
+     *
+     * @param courseId 课程ID
+     * @param pageNum  页码（默认1）
+     * @param pageSize 每页数量（默认10）
+     */
+    Page<CourseReviewVO> getCourseReviews(Long courseId, int pageNum, int pageSize);
+
+    /**
+     * 查询当前用户对该课程的评价（判断是否已评 + 返回内容）
+     * GET /api/course/{courseId}/review/my
+     *
+     * @param courseId 课程ID
+     * @param userId   当前登录用户ID
+     * @return 已评时返回 CourseReviewVO；未评时返回 null
+     */
+    CourseReviewVO getMyReview(Long courseId, Long userId);
+
+    /**
+     * 查询用户的课程评价列表（「我的评价」页面）
+     */
+    Page<CourseReviewVO> getMyReviewList(Long userId, int pageNum, int pageSize);
+
+    /**
+     * 编辑已有评价（只能改自己的，status=1才能改）
+     */
+    void updateCourseReview(Long courseId, Long userId, CourseReviewSubmitDTO dto);
 }

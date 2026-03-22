@@ -21,6 +21,8 @@
         <result column="is_mars_course" property="isMarsCourse"/>
         <result column="is_favorite" property="isFavorite"/>
         <result column="last_chapter_id" property="lastChapterId"/>
+        <result column="avg_rating" property="avgRating"/>
+        <result column="review_count" property="reviewCount"/>
     </resultMap>
 
     <!-- ==================== 分页查询课程列表 ==================== -->
@@ -42,13 +44,17 @@
         <choose>
             <when test="userId != null">
                 CASE WHEN cf.id IS NOT NULL THEN TRUE ELSE FALSE END AS is_favorite,
-                cp.last_chapter_id
+                cp.last_chapter_id,
             </when>
             <otherwise>
                 NULL AS is_favorite,
-                NULL AS last_chapter_id
+                NULL AS last_chapter_id,
             </otherwise>
         </choose>
+        ROUND((SELECT AVG(r.rating) FROM tb_course_review r
+        WHERE r.course_id = c.id AND r.status = 1), 1) AS avg_rating,
+        (SELECT COUNT(*) FROM tb_course_review r
+        WHERE r.course_id = c.id AND r.status = 1)           AS review_count
         FROM tb_course c
         <if test="userId != null">
             LEFT JOIN tb_course_favorite cf
@@ -100,10 +106,6 @@
     <!--
         getRecommendByTags
         根据标签列表 LIKE 匹配课程（OR关系，命中任意一个标签即入选）
-
-        ⚠️ 不排除已学习课程：
-        推荐列表根据近3个月购买记录固定，不因用户访问课程而减少，
-        保证"为你推荐"区块内容稳定常驻。
     -->
     <select id="getRecommendByTags" resultMap="CourseVOResultMap">
         SELECT
@@ -130,7 +132,11 @@
         c.is_apod_course,
         c.is_mars_course,
         CASE WHEN cf.id IS NOT NULL THEN TRUE ELSE FALSE END AS is_favorite,
-        NULL                                                 AS last_chapter_id
+        NULL                                                 AS last_chapter_id,
+        ROUND((SELECT AVG(r.rating) FROM tb_course_review r
+        WHERE r.course_id = c.id AND r.status = 1), 1) AS avg_rating,
+        (SELECT COUNT(*) FROM tb_course_review r
+        WHERE r.course_id = c.id AND r.status = 1)           AS review_count
         FROM tb_course c
         LEFT JOIN tb_course_favorite cf
         ON cf.course_id = c.id AND cf.user_id = #{userId}
@@ -147,9 +153,7 @@
 
     <!--
         getHotCourses
-        热门课程兜底（近3个月无购买记录 / 标签无命中时使用，按 view_count 倒序）
-
-        ⚠️ 同样不排除已学习课程，保证列表稳定。
+        热门课程兜底（按 view_count 倒序）
     -->
     <select id="getHotCourses" resultMap="CourseVOResultMap">
         SELECT
@@ -176,7 +180,11 @@
             c.is_apod_course,
             c.is_mars_course,
             CASE WHEN cf.id IS NOT NULL THEN TRUE ELSE FALSE END AS is_favorite,
-            NULL                                                 AS last_chapter_id
+            NULL                                                 AS last_chapter_id,
+            ROUND((SELECT AVG(r.rating) FROM tb_course_review r
+                   WHERE r.course_id = c.id AND r.status = 1), 1) AS avg_rating,
+            (SELECT COUNT(*) FROM tb_course_review r
+             WHERE r.course_id = c.id AND r.status = 1)           AS review_count
         FROM tb_course c
                  LEFT JOIN tb_course_favorite cf
                            ON cf.course_id = c.id AND cf.user_id = #{userId}

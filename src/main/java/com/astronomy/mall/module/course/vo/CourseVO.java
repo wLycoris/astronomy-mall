@@ -102,4 +102,10 @@ public class CourseVO {
      * 需要正文时单独调用 GET /course/chapter/{chapterId}
      */
     private List<CourseChapterVO> chapters;
+
+    /** 课程平均评分（保留1位小数，无评价时为 null）*/
+    private Double avgRating;
+
+    /** 评价总数 */
+    private Integer reviewCount;
 }

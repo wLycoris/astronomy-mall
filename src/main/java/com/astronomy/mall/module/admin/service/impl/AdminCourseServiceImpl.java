@@ -1,17 +1,21 @@
 package com.astronomy.mall.module.admin.service.impl;
 
+import cn.hutool.core.convert.Convert;
 import com.alibaba.fastjson.JSON;
 import com.astronomy.mall.common.exception.BusinessException;
 import com.astronomy.mall.module.admin.dto.ApodSyncDTO;
 import com.astronomy.mall.module.admin.dto.ChapterCreateDTO;
 import com.astronomy.mall.module.admin.dto.CourseCreateDTO;
 import com.astronomy.mall.module.admin.service.AdminCourseService;
+import com.astronomy.mall.module.admin.vo.AdminCourseReviewVO;
 import com.astronomy.mall.module.admin.vo.AdminCourseVO;
 import com.astronomy.mall.module.course.entity.Course;
 import com.astronomy.mall.module.course.entity.CourseChapter;
+import com.astronomy.mall.module.course.entity.CourseReview;
 import com.astronomy.mall.module.course.mapper.CourseChapterMapper;
 import com.astronomy.mall.module.course.mapper.CourseFavoriteMapper;
 import com.astronomy.mall.module.course.mapper.CourseMapper;
+import com.astronomy.mall.module.course.mapper.CourseReviewMapper;
 import com.astronomy.mall.module.nasa.service.NasaApiService;
 import com.astronomy.mall.module.nasa.vo.ApodVO;
 import com.astronomy.mall.module.notification.helper.NotificationHelper;
@@ -28,6 +32,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -47,6 +52,8 @@ import java.util.stream.Collectors;
  * 📌 self 字段（@Lazy 自注入）：
  *   用于在同类中调用 insertOneApodDay()，保证 @Transactional(REQUIRES_NEW) 生效。
  *   直接 this.insertOneApodDay() 会绕过 Spring AOP 代理，事务不生效。
+ *
+ * 📌 v5.6 新增：getCourseReviews / deleteCourseReview（课程评价管理）
  */
 @Slf4j
 @Service
@@ -58,6 +65,7 @@ public class AdminCourseServiceImpl implements AdminCourseService {
     private final CourseFavoriteMapper courseFavoriteMapper;
     private final NasaApiService nasaApiService;
     private final NotificationHelper notificationHelper;
+    private final CourseReviewMapper courseReviewMapper;
 
     /**
      * 自注入：让 insertOneApodDay() 的 @Transactional(REQUIRES_NEW) 通过 AOP 代理生效
@@ -381,6 +389,58 @@ public class AdminCourseServiceImpl implements AdminCourseService {
 
         courseChapterMapper.insert(chapter);
         courseMapper.incrChapterCount(apodCourseId);
+    }
+
+    // ==========================================
+    // =========== 5.6 课程评价管理 =============
+    // ==========================================
+
+    @Override
+    public Page<AdminCourseReviewVO> getCourseReviews(int pageNum, int pageSize,
+                                                      Long courseId, Integer rating, String keyword) {
+        // 参数归一化：0 视为不过滤
+        Long    courseIdFilter = (courseId != null && courseId > 0)             ? courseId : null;
+        Integer ratingFilter   = (rating   != null && rating   > 0)             ? rating   : null;
+        String  keywordFilter  = (keyword  != null && !keyword.trim().isEmpty()) ? keyword.trim() : null;
+
+        Page<Map<String, Object>> page = new Page<>(pageNum, pageSize);
+
+        // ✅ 关键修复：@Select 注解 + Page 参数时，数据在方法返回值里，
+        //    不在 page.getRecords()（page.getRecords() 始终为空列表）
+        //    必须用返回值 rawList，而不是 page.getRecords()
+        List<Map<String, Object>> rawList =
+                courseReviewMapper.selectAdminReviewPage(page, courseIdFilter, ratingFilter, keywordFilter);
+
+        Page<AdminCourseReviewVO> result = new Page<>(pageNum, pageSize);
+        result.setTotal(page.getTotal());
+        result.setRecords(rawList.stream().map(map -> {
+            AdminCourseReviewVO vo = new AdminCourseReviewVO();
+            vo.setId(Convert.toLong(map.get("id")));
+            vo.setCourseId(Convert.toLong(map.get("courseId")));
+            vo.setCourseTitle(Convert.toStr(map.get("courseTitle")));
+            vo.setUserId(Convert.toLong(map.get("userId")));
+            vo.setUsername(Convert.toStr(map.get("username")));
+            vo.setNickname(Convert.toStr(map.get("nickname"), "天文爱好者"));
+            vo.setRating(Convert.toInt(map.get("rating")));
+            vo.setContent(Convert.toStr(map.get("content")));
+            vo.setLikeCount(Convert.toInt(map.get("likeCount"), 0));
+            Object ct = map.get("createTime");
+            if (ct instanceof LocalDateTime) vo.setCreateTime((LocalDateTime) ct);
+            return vo;
+        }).collect(Collectors.toList()));
+        return result;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void deleteCourseReview(Long id) {
+        CourseReview review = courseReviewMapper.selectById(id);
+        if (review == null || review.getStatus() == null || review.getStatus() == 0) {
+            throw new BusinessException("评价不存在或已被删除");
+        }
+        review.setStatus(0);
+        courseReviewMapper.updateById(review);
+        log.info("[课程评价管理] 逻辑删除评价, reviewId={}", id);
     }
 
     // ==========================================

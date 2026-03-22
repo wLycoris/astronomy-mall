@@ -6,7 +6,9 @@ import com.astronomy.mall.module.admin.dto.ApodSyncDTO;
 import com.astronomy.mall.module.admin.dto.ChapterCreateDTO;
 import com.astronomy.mall.module.admin.dto.CourseCreateDTO;
 import com.astronomy.mall.module.admin.service.AdminCourseService;
+import com.astronomy.mall.module.admin.vo.AdminCourseReviewVO;
 import com.astronomy.mall.module.admin.vo.AdminCourseVO;
+import com.astronomy.mall.module.course.mapper.CourseReviewMapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
@@ -21,26 +23,14 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 后台课程管理 Controller（5.5 完整版，替换 5.2 的单接口版本）
+ * 后台课程管理 Controller
  *
- * 📌 与 5.2 旧版的关键区别：
- *   - 不再直接注入 APODSyncScheduler
- *   - 注入 AdminCourseService，所有逻辑走 Service 层
- *   - 11个完整接口
+ * v5.6 新增3个评价接口:
+ *   GET    /api/admin/course/reviews        评价列表（分页+筛选）
+ *   DELETE /api/admin/course/review/{id}    逻辑删除评价
+ *   GET    /api/admin/course/review/stats   评价统计（顶部3卡片）
  *
- * 共 11 个接口（全部需要管理员权限，由 AdminInterceptor 统一拦截）：
- *
- *   GET    /api/admin/course/list           - 课程列表（分页+搜索+type+status）
- *   POST   /api/admin/course/add           - 新增课程
- *   PUT    /api/admin/course/update/{id}   - 编辑课程
- *   DELETE /api/admin/course/delete/{id}   - 删除课程（deleted=1）
- *   POST   /api/admin/course/status/{id}   - 发布/下架
- *   GET    /api/admin/course/{id}/chapters - 章节列表
- *   POST   /api/admin/course/chapter/add   - 新增章节
- *   PUT    /api/admin/course/chapter/{id}  - 编辑章节
- *   DELETE /api/admin/course/chapter/{id}  - 删除章节
- *   POST   /api/admin/course/chapter/sort  - 章节排序（批量更新 sort）
- *   POST   /api/admin/course/apod/sync     - 手动触发 APOD 历史数据批量同步
+ * 共 14 个接口（原 11 + 5.6 新增 3）
  */
 @Slf4j
 @Api(tags = "管理员 - 课程管理")
@@ -50,6 +40,9 @@ import java.util.Map;
 public class AdminCourseController {
 
     private final AdminCourseService adminCourseService;
+
+    /** 直接注入 CourseReviewMapper 用于统计接口，避免新建 Service 方法 */
+    private final CourseReviewMapper courseReviewMapper;
 
     // ============================================================
     // =================== 课程管理接口（5个）=====================
@@ -129,8 +122,7 @@ public class AdminCourseController {
      */
     @ApiOperation("获取课程章节列表")
     @GetMapping("/{id}/chapters")
-    public Result<List<AdminCourseVO.ChapterVO>> getChapterList(
-            @ApiParam("课程ID") @PathVariable Long id) {
+    public Result<List<AdminCourseVO.ChapterVO>> getChapterList(@ApiParam("课程ID") @PathVariable Long id) {
         return Result.success(adminCourseService.getChapterList(id));
     }
 
@@ -212,5 +204,67 @@ public class AdminCourseController {
         Map<String, Integer> data = new HashMap<>();
         data.put("newCount", newCount);
         return Result.success(data);
+    }
+
+    // ============================================================
+    // =================== 5.6 课程评价接口（3个）=================
+    // ============================================================
+
+    /**
+     * 课程评价列表（分页 + 多条件筛选）
+     * GET /api/admin/course/reviews
+     *
+     * @param courseId 课程ID筛选（null=全部）
+     * @param rating   星级筛选（null或0=全部，1-5精确）
+     * @param keyword  用户名/昵称关键词
+     */
+    @ApiOperation("管理员端：课程评价列表（分页+筛选）")
+    @GetMapping("/reviews")
+    @AdminLog("查看课程评价列表")
+    public Result<Page<AdminCourseReviewVO>> getCourseReviews(
+            @RequestParam(defaultValue = "1")  int pageNum,
+            @RequestParam(defaultValue = "15") int pageSize,
+            @RequestParam(required = false)    Long courseId,
+            @RequestParam(required = false)    Integer rating,
+            @RequestParam(required = false)    String keyword) {
+        return Result.success(
+                adminCourseService.getCourseReviews(pageNum, pageSize, courseId, rating, keyword)
+        );
+    }
+
+    /**
+     * 课程评价统计（顶部3个卡片数据）
+     * GET /api/admin/course/review/stats
+     *
+     * ⚠️ 路径 /review/stats 必须在 /review/{id} 之前被解析到。
+     *    由于此接口是 GET、下面删除接口是 DELETE，HTTP 方法不同，不会冲突。
+     */
+    @ApiOperation("管理员端：课程评价统计（总量/本周新增/平均评分）")
+    @GetMapping("/review/stats")
+    public Result<Map<String, Object>> getCourseReviewStats() {
+        Integer total    = courseReviewMapper.countTotal();
+        Integer thisWeek = courseReviewMapper.countThisWeek();
+        Double  avg      = courseReviewMapper.avgRating();
+
+        Map<String, Object> stats = new HashMap<>();
+        stats.put("total",     total    != null ? total    : 0);
+        stats.put("thisWeek",  thisWeek != null ? thisWeek : 0);
+        // 平均评分保留1位小数，null 时返回 0.0
+        stats.put("avgRating", avg != null ? Math.round(avg * 10) / 10.0 : 0.0);
+        return Result.success(stats);
+    }
+
+    /**
+     * 逻辑删除课程评价（status = 0）
+     * DELETE /api/admin/course/review/{id}
+     *
+     * ⚠️ 路径 /review/{id}，与章节路径 /chapter/{id} 不同，不会冲突
+     */
+    @ApiOperation("管理员端：逻辑删除课程评价")
+    @DeleteMapping("/review/{id}")
+    @AdminLog("删除课程评价")
+    public Result<Void> deleteCourseReview(@ApiParam("评价ID") @PathVariable Long id) {
+        adminCourseService.deleteCourseReview(id);
+        return Result.success();
     }
 }

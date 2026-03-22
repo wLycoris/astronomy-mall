@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!--
+    课程评价 Mapper XML
+    文件路径: src/main/resources/mapper/CourseReviewMapper.xml
+
+    ⚠️ 与其他 XML 保持一致，放在 mapper/ 根目录下
+       application.yml 中 mapper-locations: classpath:mapper/**/*.xml 可自动扫描到
+-->
+<mapper namespace="com.astronomy.mall.module.course.mapper.CourseReviewMapper">
+
+    <!--
+        管理员端：课程评价列表（多条件可选筛选）
+        支持:
+          courseId  课程ID精确匹配（可选）
+          rating    星级精确匹配 1-5（可选）
+          keyword   用户名或昵称模糊搜索（可选）
+        排序: 按 create_time 倒序
+    -->
+    <select id="selectAdminReviewPage" resultType="java.util.HashMap">
+        SELECT
+        r.id,
+        r.course_id     AS courseId,
+        c.title         AS courseTitle,
+        r.user_id       AS userId,
+        u.username      AS username,
+        u.nickname      AS nickname,
+        r.rating,
+        r.content,
+        r.like_count    AS likeCount,
+        r.create_time   AS createTime
+        FROM tb_course_review r
+        LEFT JOIN tb_course  c ON r.course_id = c.id
+        LEFT JOIN tb_user    u ON r.user_id   = u.id
+        WHERE r.status = 1
+        <if test="courseId != null">
+            AND r.course_id = #{courseId}
+        </if>
+        <if test="rating != null">
+            AND r.rating = #{rating}
+        </if>
+        <if test="keyword != null and keyword != ''">
+            AND (
+            u.username LIKE CONCAT('%', #{keyword}, '%')
+            OR u.nickname LIKE CONCAT('%', #{keyword}, '%')
+            OR c.title    LIKE CONCAT('%', #{keyword}, '%')
+            )
+        </if>
+        ORDER BY r.create_time DESC
+    </select>
+
+</mapper>

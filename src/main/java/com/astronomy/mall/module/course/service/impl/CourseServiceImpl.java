@@ -1,16 +1,20 @@
 package com.astronomy.mall.module.course.service.impl;
 
+import cn.hutool.core.convert.Convert;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.astronomy.mall.common.exception.BusinessException;
 import com.astronomy.mall.module.course.dto.CourseQueryDTO;
+import com.astronomy.mall.module.course.dto.CourseReviewSubmitDTO;
 import com.astronomy.mall.module.course.entity.Course;
 import com.astronomy.mall.module.course.entity.CourseFavorite;
 import com.astronomy.mall.module.course.entity.CourseChapter;
 import com.astronomy.mall.module.course.entity.CourseProgress;
+import com.astronomy.mall.module.course.entity.CourseReview;
 import com.astronomy.mall.module.course.mapper.*;
 import com.astronomy.mall.module.course.service.CourseService;
 import com.astronomy.mall.module.course.vo.CourseChapterVO;
+import com.astronomy.mall.module.course.vo.CourseReviewVO;
 import com.astronomy.mall.module.course.vo.CourseVO;
 import com.astronomy.mall.module.notification.helper.NotificationHelper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -19,6 +23,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
@@ -45,6 +50,9 @@ import java.util.stream.Collectors;
  * 5. getRecommendCourses(userId)：
  *    根据用户近3个月购买商品的 tags 匹配课程 tags 推荐课程。
  *    7步兜底逻辑保障始终有结果，已学习的课程自动排除，最多返回6个。
+ *
+ * 📌 v5.6 新增:
+ * 6. submitCourseReview / getCourseReviews / getMyReview（课程评价功能）
  */
 @Slf4j
 @Service
@@ -56,6 +64,7 @@ public class CourseServiceImpl implements CourseService {
     private final CourseProgressMapper courseProgressMapper;
     private final CourseFavoriteMapper courseFavoriteMapper;
     private final NotificationHelper notificationHelper;
+    private final CourseReviewMapper courseReviewMapper;
 
     // ============================== 课程列表 ==============================
 
@@ -444,6 +453,134 @@ public class CourseServiceImpl implements CourseService {
 
         log.info("[CourseRecommend] userId={} 标签匹配到 {} 门课程", userId, recommended.size());
         return recommended;
+    }
+
+    // ============================== 5.6 课程评价 ==============================
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void submitCourseReview(Long courseId, Long userId, CourseReviewSubmitDTO dto) {
+        // 1. 课程是否存在
+        Course course = courseMapper.selectById(courseId);
+        if (course == null || course.getDeleted() == 1) {
+            throw new BusinessException("课程不存在");
+        }
+
+        // 2. 是否有学习进度（进入课程详情页时 insertIgnoreVisit 会建立记录）
+        CourseProgress progress = courseProgressMapper.selectOne(
+                new LambdaQueryWrapper<CourseProgress>()
+                        .eq(CourseProgress::getCourseId, courseId)
+                        .eq(CourseProgress::getUserId, userId)
+        );
+        if (progress == null) {
+            throw new BusinessException("请先进入课程学习后再评价");
+        }
+
+        // 3. 是否已评过（每课每人只能评一次）
+        CourseReview existing = courseReviewMapper.getUserReview(courseId, userId);
+        if (existing != null) {
+            throw new BusinessException("您已评价过该课程，不能重复提交");
+        }
+
+        // 4. 保存评价
+        CourseReview review = new CourseReview();
+        review.setCourseId(courseId);
+        review.setUserId(userId);
+        review.setRating(dto.getRating());
+
+        // 内容处理：去两端空白，超500字截断，空字符串存 null
+        String content = dto.getContent();
+        if (content != null) {
+            content = content.trim();
+            if (content.length() > 500) content = content.substring(0, 500);
+            if (content.isEmpty()) content = null;
+        }
+        review.setContent(content);
+        review.setLikeCount(0);
+        review.setStatus(1);
+        courseReviewMapper.insert(review);
+
+        log.info("[课程评价] 提交成功, courseId={}, userId={}, rating={}", courseId, userId, dto.getRating());
+    }
+
+    @Override
+    public Page<CourseReviewVO> getCourseReviews(Long courseId, int pageNum, int pageSize) {
+        Page<Map<String, Object>> page = new Page<>(pageNum, pageSize);
+        // ✅ 修复：@Select 注解分页时数据在返回值里，不在 page.getRecords()
+        List<Map<String, Object>> rawList = courseReviewMapper.selectUserReviewPage(page, courseId);
+
+        Page<CourseReviewVO> result = new Page<>(pageNum, pageSize);
+        result.setTotal(page.getTotal());
+        result.setRecords(rawList.stream().map(map -> {
+            CourseReviewVO vo = new CourseReviewVO();
+            vo.setId(Convert.toLong(map.get("id")));
+            vo.setCourseId(Convert.toLong(map.get("courseId")));
+            vo.setUserId(Convert.toLong(map.get("userId")));
+            vo.setNickname(Convert.toStr(map.get("nickname"), "天文爱好者"));
+            vo.setAvatar(Convert.toStr(map.get("avatar")));
+            vo.setRating(Convert.toInt(map.get("rating")));
+            vo.setContent(Convert.toStr(map.get("content")));
+            vo.setLikeCount(Convert.toInt(map.get("likeCount"), 0));
+            Object ct = map.get("createTime");
+            if (ct instanceof LocalDateTime) vo.setCreateTime((LocalDateTime) ct);
+            return vo;
+        }).collect(Collectors.toList()));
+        return result;
+    }
+
+    @Override
+    public CourseReviewVO getMyReview(Long courseId, Long userId) {
+        CourseReview review = courseReviewMapper.getUserReview(courseId, userId);
+        if (review == null) return null;
+
+        CourseReviewVO vo = new CourseReviewVO();
+        vo.setId(review.getId());
+        vo.setCourseId(review.getCourseId());
+        vo.setUserId(review.getUserId());
+        vo.setRating(review.getRating());
+        vo.setContent(review.getContent());
+        vo.setLikeCount(review.getLikeCount());
+        vo.setCreateTime(review.getCreateTime());
+        return vo;
+    }
+    @Override
+    public Page<CourseReviewVO> getMyReviewList(Long userId, int pageNum, int pageSize) {
+        Page<Map<String, Object>> page = new Page<>(pageNum, pageSize);
+        List<Map<String, Object>> rawList = courseReviewMapper.selectMyReviewPage(page, userId);
+
+        Page<CourseReviewVO> result = new Page<>(pageNum, pageSize);
+        result.setTotal(page.getTotal());
+        result.setRecords(rawList.stream().map(map -> {
+            CourseReviewVO vo = new CourseReviewVO();
+            vo.setId(Convert.toLong(map.get("id")));
+            vo.setCourseId(Convert.toLong(map.get("courseId")));
+            vo.setRating(Convert.toInt(map.get("rating")));
+            vo.setContent(Convert.toStr(map.get("content")));
+            vo.setCourseTitle(Convert.toStr(map.get("courseTitle")));
+            vo.setCourseCover(Convert.toStr(map.get("courseCover")));
+            Object ct = map.get("createTime");
+            if (ct instanceof LocalDateTime) vo.setCreateTime((LocalDateTime) ct);
+            return vo;
+        }).collect(Collectors.toList()));
+        return result;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void updateCourseReview(Long courseId, Long userId, CourseReviewSubmitDTO dto) {
+        CourseReview existing = courseReviewMapper.getUserReview(courseId, userId);
+        if (existing == null) {
+            throw new BusinessException("评价不存在，请先提交评价");
+        }
+        String content = dto.getContent();
+        if (content != null) {
+            content = content.trim();
+            if (content.length() > 500) content = content.substring(0, 500);
+            if (content.isEmpty()) content = null;
+        }
+        int rows = courseReviewMapper.updateReview(existing.getId(), userId, dto.getRating(), content);
+        if (rows == 0) throw new BusinessException("编辑失败，请重试");
+        log.info("[课程评价] 编辑成功, courseId={}, userId={}, rating={}", courseId, userId, dto.getRating());
     }
 
     // ============================== 私有工具方法 ==============================

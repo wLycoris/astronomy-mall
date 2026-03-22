@@ -2,19 +2,22 @@ package com.astronomy.mall.module.course.controller;
 
 import com.astronomy.mall.common.result.Result;
 import com.astronomy.mall.module.course.dto.CourseQueryDTO;
+import com.astronomy.mall.module.course.dto.CourseReviewSubmitDTO;
 import com.astronomy.mall.module.course.service.CourseService;
 import com.astronomy.mall.module.course.vo.CourseChapterVO;
+import com.astronomy.mall.module.course.vo.CourseReviewVO;
 import com.astronomy.mall.module.course.vo.CourseVO;
 import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import io.swagger.annotations.ApiParam;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import javax.servlet.http.HttpServletRequest;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -23,24 +26,16 @@ import java.util.Map;
  * 天文课程 用户端 Controller
  *
  * 接口列表:
- *   GET  /api/course/list                    课程列表（分页+多条件筛选）
- *   GET  /api/course/{id}                    课程详情（含章节目录）
- *   GET  /api/course/chapter/{chapterId}     章节内容（副作用：记录进度）
- *   POST /api/course/favorite/toggle/{id}    收藏/取消收藏（需登录）
- *   GET  /api/course/favorite/list           我的收藏列表（需登录）
- *   GET  /api/course/history                 学习历史（需登录）
- *   GET  /api/course/{id}/reviews            评价列表（占位，本期返回空）
- *   GET  /api/course/recommend               推荐课程（5.4新增，可选认证）
- *
- * 📌 认证说明:
- * - 课程列表/详情/章节: 可选认证（登录时附加 isFavorite/lastChapterId）
- * - 收藏/历史: 需要登录（Controller 层校验 userId != null）
- * - 推荐课程: 可选认证（未登录返回热门兜底，登录返回个性化推荐）
- *
- * 📌 WebMvcConfig 说明:
- * /api/course/** 已在 OPTIONAL_AUTH_LIST（可选认证列表）中，
- * Token 存在则 JwtInterceptor 解析并 setAttribute("userId", ...)，
- * Token 不存在则跳过，userId 为 null。
+ *   GET  /api/course/list                    课程列表
+ *   GET  /api/course/{id}                    课程详情
+ *   GET  /api/course/chapter/{chapterId}     章节内容（记录进度）
+ *   GET  /api/course/recommend               推荐课程（5.4新增）
+ *   POST /api/course/favorite/toggle/{id}    收藏/取消收藏
+ *   GET  /api/course/favorite/list           我的收藏列表
+ *   GET  /api/course/history                 学习历史
+ *   GET  /api/course/{id}/reviews            评价列表（5.6 真实接口）
+ *   POST /api/course/{courseId}/review       提交评价（5.6 新增）
+ *   GET  /api/course/{courseId}/review/my    查询我的评价（5.6 新增）
  */
 @Slf4j
 @RestController
@@ -80,9 +75,7 @@ public class CourseController {
      */
     @GetMapping("/list")
     @ApiOperation("课程列表")
-    public Result<IPage<CourseVO>> getCourseList(
-            CourseQueryDTO dto,
-            HttpServletRequest request) {
+    public Result<IPage<CourseVO>> getCourseList(CourseQueryDTO dto, HttpServletRequest request) {
         Long userId = getCurrentUserId(request);
         return Result.success(courseService.getCourseList(dto, userId));
     }
@@ -201,14 +194,86 @@ public class CourseController {
         return Result.success(courseService.getMyHistory(userId, pageNum, pageSize));
     }
 
+    // ==================== 5.6 评价接口 ====================
+
     /**
-     * 课程评价列表（本期占位，返回空列表）
-     * 详情页底部「课程评价功能即将开放」提示用
+     * 课程评价列表（分页，按时间倒序，status=1）
+     * GET /api/course/{id}/reviews
+     * 游客可访问
+     *
+     * ⚠️ 注意：Spring MVC 对 /{id}/reviews 和 /{courseId}/review/my 路径的解析
+     *    - /{id}/reviews         → 此接口
+     *    - /{courseId}/review/my → getMyReview（my 是字符串，不会冲突）
      */
-    @GetMapping("/{id}/reviews")
-    @ApiOperation("课程评价列表（占位）")
-    public Result<?> getCourseReviews(@PathVariable Long id) {
-        // 本期不开放评价功能，返回空列表占位
-        return Result.success(new ArrayList<>());
+    @GetMapping("/{courseId}/reviews")
+    @ApiOperation("课程评价列表（分页）")
+    public Result<Page<CourseReviewVO>> getCourseReviews(
+            @ApiParam("课程ID") @PathVariable Long courseId,
+            @RequestParam(defaultValue = "1")  int pageNum,
+            @RequestParam(defaultValue = "10") int pageSize) {
+        return Result.success(courseService.getCourseReviews(courseId, pageNum, pageSize));
+    }
+
+    /**
+     * 提交课程评价
+     * POST /api/course/{courseId}/review
+     * 需要登录，每门课每人只能评一次
+     */
+    @PostMapping("/{courseId}/review")
+    @ApiOperation("提交课程评价（需登录，每课每人只能评一次）")
+    public Result<Void> submitCourseReview(
+            HttpServletRequest request,
+            @ApiParam("课程ID") @PathVariable Long courseId,
+            @Validated @RequestBody CourseReviewSubmitDTO dto) {
+        Long userId = getCurrentUserId(request);
+        if (userId == null) return Result.error(401, "请先登录");
+        courseService.submitCourseReview(courseId, userId, dto);
+        return Result.success();
+    }
+
+    /**
+     * 查询当前用户对该课程的评价
+     * GET /api/course/{courseId}/review/my
+     * 需要登录；未评时 data=null（不报错）
+     */
+    @GetMapping("/{courseId}/review/my")
+    @ApiOperation("查询我的评价（判断是否已评）")
+    public Result<CourseReviewVO> getMyReview(
+            HttpServletRequest request,
+            @ApiParam("课程ID") @PathVariable Long courseId) {
+        Long userId = getCurrentUserId(request);
+        if (userId == null) return Result.success(null);
+        return Result.success(courseService.getMyReview(courseId, userId));
+    }
+
+    /**
+     * 我的课程评价列表（「我的评价」页面）
+     * GET /api/course/review/my/list
+     */
+    @GetMapping("/review/my/list")
+    @ApiOperation("我的课程评价列表")
+    public Result<Page<CourseReviewVO>> getMyReviewList(
+            HttpServletRequest request,
+            @RequestParam(defaultValue = "1")  int pageNum,
+            @RequestParam(defaultValue = "10") int pageSize) {
+        Long userId = getCurrentUserId(request);
+        if (userId == null) return Result.error(401, "请先登录");
+        return Result.success(courseService.getMyReviewList(userId, pageNum, pageSize));
+    }
+
+    /**
+     * 编辑课程评价（只能编辑自己的）
+     * PUT /api/course/{courseId}/review
+     */
+    @PutMapping("/{courseId}/review")
+    @ApiOperation("编辑课程评价")
+    public Result<Void> updateCourseReview(
+            HttpServletRequest request,
+            @PathVariable Long courseId,
+            @Validated @RequestBody CourseReviewSubmitDTO dto) {
+        Long userId = getCurrentUserId(request);
+        if (userId == null) return Result.error(401, "请先登录");
+        courseService.updateCourseReview(courseId, userId, dto);
+        return Result.success();
     }
 }
