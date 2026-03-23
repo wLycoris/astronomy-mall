@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!--
+    UserCheckinMapper.xml
+    对应接口: com.astronomy.mall.module.location.mapper.UserCheckinMapper
+    文件位置: src/main/resources/mapper/xml/UserCheckinMapper.xml
+
+    📌 6.0 骨架文件，SQL在 6.3 节填充
+-->
+<mapper namespace="com.astronomy.mall.module.location.mapper.UserCheckinMapper">
+
+    <!-- ResultMap：CheckinVO（含观测点信息） -->
+    <resultMap id="CheckinVOMap" type="com.astronomy.mall.module.location.vo.CheckinVO">
+        <id column="id" property="id"/>
+        <result column="spot_id"      property="spotId"/>
+        <result column="spot_name"    property="spotName"/>
+        <result column="province"     property="province"/>
+        <result column="city"         property="city"/>
+        <result column="weather"      property="weather"/>
+        <result column="moon_phase"   property="moonPhase"/>
+        <result column="checkin_date" property="checkinDate"/>
+        <result column="create_time"  property="createTime"/>
+    </resultMap>
+
+    <!--
+        我的签到历史（分页查询，JOIN观测点表获取名称）
+        TODO 6.3: 在6.3节开发时填充此SQL
+    -->
+    <select id="listMyCheckins" resultMap="CheckinVOMap">
+        SELECT
+            c.id,
+            c.spot_id,
+            s.spot_name,
+            s.province,
+            s.city,
+            c.weather,
+            c.moon_phase,
+            c.checkin_date,
+            c.create_time
+        FROM tb_user_checkin c
+                 LEFT JOIN tb_observation_spot s ON c.spot_id = s.id AND s.deleted = 0
+        WHERE c.user_id = #{userId}
+        ORDER BY c.create_time DESC
+            LIMIT #{pageOffset}, #{pageSize}
+    </select>
+
+</mapper>

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!--
+    SpotRatingMapper.xml
+    对应接口: com.astronomy.mall.module.location.mapper.SpotRatingMapper
+    文件位置: src/main/resources/mapper/xml/SpotRatingMapper.xml
+
+    📌 SpotRatingMapper 的3个方法全部使用 @Select/@Update 注解实现，无需XML中写SQL
+       - calcAvgRating()  → @Select 注解
+       - countRating()    → @Select 注解
+       - getUserScore()   → @Select 注解
+
+    📌 此XML文件仅作为 MyBatis 命名空间注册，保持与其他Mapper文件结构一致
+       BaseMapper 的 insert/delete/update/select 由 MyBatis-Plus 自动提供，无需手写
+-->
+<mapper namespace="com.astronomy.mall.module.location.mapper.SpotRatingMapper">
+
+    <!--
+        6.0 骨架：当前无需自定义SQL，所有方法已用注解实现
+        TODO 6.1: 如有复杂查询需求可在此扩展
+    -->
+
+</mapper>

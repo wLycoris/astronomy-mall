@@ -25,6 +25,8 @@ import java.util.Map;
  * 📌 2026-03-20 新增: sendCourseChapterAddedNotification    (5.1 课程新增章节，批量)
  * 📌 2026-03-20 新增: sendCourseApodUpdatedNotification     (5.1 NASA APOD同步，批量)
  * 📌 2026-03-20 新增: sendCourseCompletedNotification       (5.1 课程学习完成，单条)
+ * 📌 2026-03-23 新增: sendCheckinNotification               (6.0 观测点签到成功)
+ * 📌 2026-03-23 新增: sendWeatherSuitableNotification       (6.0 今晚观测条件极佳，默认disabled)
  */
 @Slf4j
 @Component
@@ -517,7 +519,7 @@ public class NotificationHelper {
         }
     }
 
-    // ==================== 课程模块通知 (3种) ====================
+    // ==================== 课程模块通知 (3种) ✅ 2026-03-20 ====================
 
     /**
      * 通知1: 课程新增章节通知（批量发给收藏该课程的所有用户）
@@ -526,12 +528,6 @@ public class NotificationHelper {
      * 📌 通知模板: COURSE_CHAPTER_ADDED (module=course, type=chapter_added)
      * 📌 模板变量: courseTitle / chapterTitle / courseId
      * 📌 跳转路径: /course/{courseId}
-     * 📌 发送对象: CourseFavoriteMapper.selectUserIdsByCourseId(courseId) 获取的收藏用户列表
-     *
-     * @param courseId        课程ID
-     * @param courseTitle     课程标题
-     * @param chapterTitle    新增章节标题
-     * @param favoriteUserIds 收藏该课程的用户ID列表（空时直接返回，不发通知）
      */
     @Async
     public void sendCourseChapterAddedNotification(Long courseId, String courseTitle,
@@ -566,12 +562,8 @@ public class NotificationHelper {
      *
      * 📌 触发时机: APODSyncScheduler.syncTodayApod() 成功插入新章节后调用
      * 📌 通知模板: COURSE_APOD_UPDATED (module=course, type=apod_updated)
-     * 📌 模板变量: chapterTitle（今日APOD英文标题）/ courseId
+     * 📌 模板变量: chapterTitle / courseId
      * 📌 跳转路径: /course/{apodCourseId}
-     *
-     * @param apodCourseId    APOD课程ID（种子数据预置的固定课程）
-     * @param apodTitle       今日APOD标题（NASA返回的英文标题）
-     * @param favoriteUserIds 收藏APOD课程的用户ID列表
      */
     @Async
     public void sendCourseApodUpdatedNotification(Long apodCourseId, String apodTitle,
@@ -605,12 +597,7 @@ public class NotificationHelper {
      * 📌 触发时机: CourseServiceImpl.checkCourseCompletion() 检测到完课时调用
      * 📌 通知模板: COURSE_COMPLETED (module=course, type=completed)
      * 📌 模板变量: courseTitle / courseId
-     * 📌 跳转路径: /course/{courseId}
-     * ⚠️ 调用方已排除 is_apod_course=1 和 is_mars_course=1 的课程，此处无需重复判断
-     *
-     * @param userId      完课用户ID
-     * @param courseId    课程ID
-     * @param courseTitle 课程标题
+     * ⚠️ 调用方已排除 is_apod_course=1 和 is_mars_course=1，此处无需重复判断
      */
     @Async
     public void sendCourseCompletedNotification(Long userId, Long courseId, String courseTitle) {
@@ -632,6 +619,83 @@ public class NotificationHelper {
             log.info("课程完成通知已发送 userId={} courseId={} title={}", userId, courseId, courseTitle);
         } catch (Exception e) {
             log.error("发送课程完成通知失败 userId={} courseId={}", userId, courseId, e);
+        }
+    }
+
+    // ==================== 地理位置模块通知 (2种) ✅ 6.0新增 2026-03-23 ====================
+
+    /**
+     * 签到成功通知（实时触发）
+     *
+     * 📌 触发时机: LocationServiceImpl.checkin() 签到成功后调用（6.3节接入）
+     * 📌 通知模板: LOCATION_CHECKIN_SUCCESS (module=location, type=checkin_success, enabled=1)
+     * 📌 模板变量: spotName / todayCount / spotId
+     * 📌 跳转路径: /location
+     *
+     * @param userId     签到用户ID
+     * @param spotName   观测点名称
+     * @param spotId     观测点ID（用于通知跳转）
+     * @param todayCount 今日该观测点签到总人数（含本次）
+     */
+    @Async
+    public void sendCheckinNotification(Long userId, String spotName, Long spotId, int todayCount) {
+        try {
+            Map<String, Object> variables = new HashMap<>();
+            variables.put("spotName",   spotName);
+            variables.put("todayCount", String.valueOf(todayCount));
+            variables.put("spotId",     spotId.toString());
+
+            SendNotificationDTO dto = SendNotificationDTO.builder()
+                    .userId(userId)
+                    .module("location")
+                    .type("checkin_success")
+                    .relatedId(spotId)
+                    .relatedType("spot")
+                    .priority(1)
+                    .variables(variables)
+                    .build();
+
+            notificationService.sendNotification(dto);
+            log.info("签到成功通知已发送: userId={}, spotName={}, todayCount={}", userId, spotName, todayCount);
+        } catch (Exception e) {
+            // 通知失败不影响签到主流程，仅记录日志
+            log.error("发送签到成功通知失败: userId={}, spotId={}, error={}", userId, spotId, e.getMessage());
+        }
+    }
+
+    /**
+     * 今晚观测条件极佳通知（主动推送，模板默认 enabled=0）
+     *
+     * 📌 触发时机: 定时任务或管理员手动触发（6.2节预留，按需启用）
+     * 📌 通知模板: LOCATION_WEATHER_SUITABLE (module=location, type=weather_suitable, enabled=0)
+     * 📌 模板变量: score（0-100分）
+     * 📌 跳转路径: /location
+     * ⚠️ 模板在数据库中 enabled=0，NotificationService.sendNotification() 会自动跳过禁用模板
+     *    管理员在后台「通知模板管理」页将 enabled 改为 1 后此方法才会实际发送通知
+     *
+     * @param userId 目标用户ID
+     * @param score  今晚综合观测评分（0-100）
+     */
+    @Async
+    public void sendWeatherSuitableNotification(Long userId, int score) {
+        try {
+            Map<String, Object> variables = new HashMap<>();
+            variables.put("score", String.valueOf(score));
+
+            SendNotificationDTO dto = SendNotificationDTO.builder()
+                    .userId(userId)
+                    .module("location")
+                    .type("weather_suitable")
+                    .relatedId(null)
+                    .relatedType("location")
+                    .priority(0)
+                    .variables(variables)
+                    .build();
+
+            notificationService.sendNotification(dto);
+            log.info("今晚观测条件极佳通知已发送: userId={}, score={}", userId, score);
+        } catch (Exception e) {
+            log.error("发送今晚观测条件通知失败: userId={}, score={}, error={}", userId, score, e.getMessage());
         }
     }
 }

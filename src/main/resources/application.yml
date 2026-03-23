@@ -97,3 +97,6 @@ logging:
     org.springframework: info
   pattern:
     console: '%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{50} - %msg%n'
+
+amap:
+  web-key: 2ce80d8a2c6b51db75fd2c6603086432

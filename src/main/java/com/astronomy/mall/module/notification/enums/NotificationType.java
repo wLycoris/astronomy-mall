@@ -5,6 +5,13 @@ import lombok.Getter;
 
 /**
  * 通知类型枚举
+ *
+ * 📌 变更记录:
+ * - v6.7  初始化，商城/论坛/课程/AI/系统模块枚举
+ * - 5.1   新增课程3种: COURSE_CHAPTER_ADDED / COURSE_APOD_UPDATED / COURSE_COMPLETED
+ * - 6.0   地理位置模块: 替换旧4个占位枚举 → 实际使用的2个
+ *          删除: NEARBY_ACTIVITY / CHECKIN_SUCCESS / WEATHER_ALERT / LOCATION_RECOMMEND
+ *          新增: LOCATION_CHECKIN_SUCCESS / LOCATION_WEATHER_SUITABLE
  */
 @Getter
 @AllArgsConstructor
@@ -37,23 +44,23 @@ public enum NotificationType {
     FOLLOW("follow", "被关注", NotificationModule.FORUM),
     HOT_POST("hot_post", "帖子热门", NotificationModule.FORUM),
 
-    // ==================== 课程模块 (6种) ====================
+    // ==================== 课程模块 (9种) ====================
     COURSE_PURCHASED("course_purchased", "课程购买成功", NotificationModule.COURSE),
     COURSE_UPDATED("course_updated", "课程更新", NotificationModule.COURSE),
     COURSE_REMIND("course_remind", "课程提醒", NotificationModule.COURSE),
     HOMEWORK_REVIEWED("homework_reviewed", "作业批改", NotificationModule.COURSE),
     CERTIFICATE_ISSUED("certificate_issued", "证书颁发", NotificationModule.COURSE),
     COURSE_EXPIRED("course_expired", "课程即将过期", NotificationModule.COURSE),
-    // 课程模块-新增 (3种)
+    // 课程模块-新增 (3种) ✅ 2026-03-20
     COURSE_CHAPTER_ADDED("course_chapter_added", "课程新增章节",  NotificationModule.COURSE),
     COURSE_APOD_UPDATED("course_apod_updated",   "APOD课程更新", NotificationModule.COURSE),
     COURSE_COMPLETED("course_completed",          "课程学习完成", NotificationModule.COURSE),
 
-    // ==================== 地理位置模块 (4种) ====================
-    NEARBY_ACTIVITY("nearby_activity", "附近活动", NotificationModule.LOCATION),
-    CHECKIN_SUCCESS("checkin_success", "签到成功", NotificationModule.LOCATION),
-    WEATHER_ALERT("weather_alert", "天气提醒", NotificationModule.LOCATION),
-    LOCATION_RECOMMEND("location_recommend", "地点推荐", NotificationModule.LOCATION),
+    // ==================== 地理位置模块 (2种) ✅ 6.0新增 ====================
+    // 📌 6.0: 替换原4个占位枚举(NEARBY_ACTIVITY/CHECKIN_SUCCESS/WEATHER_ALERT/LOCATION_RECOMMEND)
+    //         改为实际对应通知模板的2个枚举，code与tb_notification_template.type字段保持一致
+    LOCATION_CHECKIN_SUCCESS("checkin_success",   "观测点签到成功",     NotificationModule.LOCATION),
+    LOCATION_WEATHER_SUITABLE("weather_suitable", "今晚观测条件极佳",   NotificationModule.LOCATION),
 
     // ==================== 推荐系统 (3种) ====================
     PRODUCT_RECOMMEND("product_recommend", "商品推荐", NotificationModule.RECOMMEND),

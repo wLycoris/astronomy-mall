@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!--
+    ObservationSpotMapper.xml
+    对应接口: com.astronomy.mall.module.location.mapper.ObservationSpotMapper
+    文件位置: src/main/resources/mapper/xml/ObservationSpotMapper.xml
+
+    📌 6.0 骨架文件，SQL在 6.1 节填充
+    📌 application.yml 必须配置 mapper-locations: classpath:mapper/**/*.xml（含**子目录扫描）
+-->
+<mapper namespace="com.astronomy.mall.module.location.mapper.ObservationSpotMapper">
+
+    <!-- ResultMap：ObservationSpotVO -->
+    <resultMap id="SpotVOMap" type="com.astronomy.mall.module.location.vo.ObservationSpotVO">
+        <id column="id" property="id"/>
+        <result column="spot_name"             property="spotName"/>
+        <result column="longitude"             property="longitude"/>
+        <result column="latitude"              property="latitude"/>
+        <result column="province"              property="province"/>
+        <result column="city"                  property="city"/>
+        <result column="address"               property="address"/>
+        <result column="altitude"              property="altitude"/>
+        <result column="light_pollution_level" property="lightPollutionLevel"/>
+        <result column="rating"                property="rating"/>
+        <result column="rating_count"          property="ratingCount"/>
+        <result column="description"           property="description"/>
+        <result column="images"                property="images"/>
+        <result column="checkin_count"         property="checkinCount"/>
+    </resultMap>
+
+    <!--
+        观测点列表查询（带筛选条件）
+        TODO 6.1: 在6.1节开发时填充此SQL，骨架暂保留空实现
+        当前返回空列表，不影响骨架编译
+    -->
+    <select id="listSpots" resultMap="SpotVOMap">
+        SELECT
+        id, spot_name, longitude, latitude, province, city, address,
+        altitude, light_pollution_level, rating, rating_count,
+        description, images, checkin_count
+        FROM tb_observation_spot
+        WHERE deleted = 0
+        <if test="province != null and province != ''">
+            AND province = #{province}
+        </if>
+        <if test="city != null and city != ''">
+            AND city = #{city}
+        </if>
+        <if test="maxLightPollution != null">
+            AND light_pollution_level &lt;= #{maxLightPollution}
+        </if>
+        ORDER BY light_pollution_level ASC, rating DESC
+    </select>
+
+</mapper>
