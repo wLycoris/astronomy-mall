@@ -3,67 +3,71 @@ package com.astronomy.mall.module.location.vo;
 import lombok.Data;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.List;
 
 /**
- * 观测点详情VO（含当前用户评分状态）
+ * 观测点详情 VO
+ *
  * 对应接口: GET /api/location/spot/{id}
  *
- * 📌 6.0 骨架，字段在 6.1 节按需调整
- * 📌 myScore: 当前登录用户对该观测点的历史评分（null=未评分，前端据此显示评分UI）
+ * ⚠️ 字段说明（与实体类对照）:
+ *   name         ← entity.spotName        (spot_name)
+ *   bortleLevel  ← entity.lightPollutionLevel (light_pollution_level)
+ *   fullDescription ← 复用 description 字段（表里没有独立的 full_description 列）
+ *   images       ← Service 层从 entity.images (JSON字符串) 解析而来
+ *   mainImage    ← XML 层从 images JSON 第一张取，或 Service 层 enrichImages() 补充
  */
 @Data
 public class SpotDetailVO {
 
-    /** 观测点ID */
     private Long id;
 
-    /** 观测点名称 */
-    private String spotName;
+    /** 观测点名称（← spot_name） */
+    private String name;
 
-    /** 经度(高德GCJ-02) */
-    private BigDecimal longitude;
-
-    /** 纬度(高德GCJ-02) */
-    private BigDecimal latitude;
-
-    /** 省份 */
     private String province;
-
-    /** 城市 */
     private String city;
-
-    /** 详细地址 */
     private String address;
-
-    /** 海拔(米) */
+    private BigDecimal latitude;
+    private BigDecimal longitude;
     private Integer altitude;
 
-    /** Bortle暗天等级(1-9，越小越好) */
-    private Integer lightPollutionLevel;
+    /**
+     * Bortle 暗天等级 1-9（← light_pollution_level）
+     * 1=最佳暗天, 9=城市天空
+     */
+    private Integer bortleLevel;
 
-    /** 综合评分(0-5) */
     private BigDecimal rating;
-
-    /** 评分人数 */
     private Integer ratingCount;
 
-    /** 描述 */
+    /** 简介（← description） */
     private String description;
 
-    /** 图片列表（JSON数组字符串） */
-    private String images;
-
-    /** 历史签到总次数 */
-    private Integer checkinCount;
+    /**
+     * 完整描述（当前复用 description，表里没有独立的 full_description 列）
+     * 6.5 管理员编辑时如需区分，可在数据库 ALTER TABLE 加 full_description 列
+     */
+    private String fullDescription;
 
     /**
-     * 当前登录用户对此观测点的历史评分（null=未评分过）
-     * 用于前端判断是否显示"已评分"状态
+     * 图片 URL 列表（已从 JSON 字符串解析）
+     * Service 层 enrichImages() 负责填充
      */
+    private List<String> images;
+
+    /** 主图（images 第一张，XML 层直接取 JSON_EXTRACT） */
+    private String mainImage;
+
+    /** 当前登录用户评分（未评分/未登录为 null） */
     private Integer myScore;
 
-    /**
-     * 当前用户今日是否已签到（true=已签到，签到按钮置灰）
-     */
-    private Boolean todayCheckedIn;
+    /** 今日签到人次 */
+    private Integer todayCheckinCount;
+
+    /** 累计签到人次 */
+    private Integer totalCheckinCount;
+
+    private LocalDateTime createTime;
 }

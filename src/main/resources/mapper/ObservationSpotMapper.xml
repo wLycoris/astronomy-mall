@@ -2,56 +2,131 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 
-<!--
-    ObservationSpotMapper.xml
-    对应接口: com.astronomy.mall.module.location.mapper.ObservationSpotMapper
-    文件位置: src/main/resources/mapper/xml/ObservationSpotMapper.xml
-
-    📌 6.0 骨架文件，SQL在 6.1 节填充
-    📌 application.yml 必须配置 mapper-locations: classpath:mapper/**/*.xml（含**子目录扫描）
--->
 <mapper namespace="com.astronomy.mall.module.location.mapper.ObservationSpotMapper">
 
-    <!-- ResultMap：ObservationSpotVO -->
-    <resultMap id="SpotVOMap" type="com.astronomy.mall.module.location.vo.ObservationSpotVO">
-        <id column="id" property="id"/>
-        <result column="spot_name"             property="spotName"/>
-        <result column="longitude"             property="longitude"/>
-        <result column="latitude"              property="latitude"/>
-        <result column="province"              property="province"/>
-        <result column="city"                  property="city"/>
-        <result column="address"               property="address"/>
-        <result column="altitude"              property="altitude"/>
-        <result column="light_pollution_level" property="lightPollutionLevel"/>
-        <result column="rating"                property="rating"/>
-        <result column="rating_count"          property="ratingCount"/>
-        <result column="description"           property="description"/>
-        <result column="images"                property="images"/>
-        <result column="checkin_count"         property="checkinCount"/>
-    </resultMap>
-
     <!--
-        观测点列表查询（带筛选条件）
-        TODO 6.1: 在6.1节开发时填充此SQL，骨架暂保留空实现
-        当前返回空列表，不影响骨架编译
+        ObservationSpotMapper.xml
+        文件位置: src/main/resources/mapper/xml/ObservationSpotMapper.xml
+
+        ⚠️ 列名对照（实体字段 → 数据库列名）:
+          spotName            → spot_name
+          lightPollutionLevel → light_pollution_level
+          ratingCount         → rating_count
+          checkinCount        → checkin_count
+          createTime          → create_time
+
+        ⚠️ 不存在的列（原XML写错了）:
+          ❌ s.name          → ✅ s.spot_name
+          ❌ s.bortle_level  → ✅ s.light_pollution_level
+          ❌ s.full_description → 不存在，用 s.description 替代
+          ❌ s.main_image    → 不存在，前端从 images JSON 第一张取
     -->
-    <select id="listSpots" resultMap="SpotVOMap">
+
+    <!-- ============================================================
+         selectNearbySpots - Haversine 距离计算 + 多条件筛选
+         ============================================================ -->
+    <select id="selectNearbySpots" resultType="com.astronomy.mall.module.location.vo.ObservationSpotVO">
         SELECT
-        id, spot_name, longitude, latitude, province, city, address,
-        altitude, light_pollution_level, rating, rating_count,
-        description, images, checkin_count
-        FROM tb_observation_spot
-        WHERE deleted = 0
+        s.id,
+        s.spot_name                     AS name,
+        s.province,
+        s.city,
+        s.address,
+        s.latitude,
+        s.longitude,
+        s.altitude,
+        s.light_pollution_level         AS bortleLevel,
+        s.rating,
+        s.rating_count                  AS ratingCount,
+        s.description,
+        s.create_time                   AS createTime,
+        /* mainImage: 从 images JSON 里取第一张，找不到返回 null */
+        CASE
+        WHEN s.images IS NULL OR s.images = '[]' OR s.images = '' THEN NULL
+        ELSE JSON_UNQUOTE(JSON_EXTRACT(s.images, '$[0]'))
+        END AS mainImage,
+        /* Haversine 距离公式，单位 km，保留2位小数 */
+        ROUND(
+        2 * 6371 * ASIN(
+        SQRT(
+        POWER(SIN((s.latitude  - #{latitude})  * PI() / 360), 2) +
+        COS(#{latitude}  * PI() / 180) *
+        COS(s.latitude   * PI() / 180) *
+        POWER(SIN((s.longitude - #{longitude}) * PI() / 360), 2)
+        )
+        ), 2
+        ) AS distance,
+        /* 当前用户评分（未登录或未评分返回 NULL） */
+        <choose>
+            <when test="currentUserId != null">
+                (SELECT r.score FROM tb_spot_rating r
+                WHERE r.user_id = #{currentUserId} AND r.spot_id = s.id
+                LIMIT 1)
+            </when>
+            <otherwise>NULL</otherwise>
+        </choose>
+        AS myScore
+        FROM tb_observation_spot s
+        WHERE s.deleted = 0
         <if test="province != null and province != ''">
-            AND province = #{province}
+            AND s.province = #{province}
         </if>
         <if test="city != null and city != ''">
-            AND city = #{city}
+            AND s.city = #{city}
         </if>
         <if test="maxLightPollution != null">
-            AND light_pollution_level &lt;= #{maxLightPollution}
+            AND s.light_pollution_level &lt;= #{maxLightPollution}
         </if>
-        ORDER BY light_pollution_level ASC, rating DESC
+        HAVING distance &lt;= #{radius}
+        ORDER BY distance ASC
+        LIMIT #{limit}
+    </select>
+
+    <!-- ============================================================
+         selectSpotDetail - 观测点详情（含签到统计 + 当前用户评分）
+         ============================================================ -->
+    <select id="selectSpotDetail" resultType="com.astronomy.mall.module.location.vo.SpotDetailVO">
+        SELECT
+        s.id,
+        s.spot_name                     AS name,
+        s.province,
+        s.city,
+        s.address,
+        s.latitude,
+        s.longitude,
+        s.altitude,
+        s.light_pollution_level         AS bortleLevel,
+        s.rating,
+        s.rating_count                  AS ratingCount,
+        s.description,
+        /* fullDescription 复用 description（表里没有单独的 full_description 列） */
+        s.description                   AS fullDescription,
+        /* mainImage 从 images 第一张取 */
+        CASE
+        WHEN s.images IS NULL OR s.images = '[]' OR s.images = '' THEN NULL
+        ELSE JSON_UNQUOTE(JSON_EXTRACT(s.images, '$[0]'))
+        END AS mainImage,
+        s.create_time                   AS createTime,
+        /* 当前用户评分 */
+        <choose>
+            <when test="currentUserId != null">
+                (SELECT r.score FROM tb_spot_rating r
+                WHERE r.user_id = #{currentUserId} AND r.spot_id = s.id
+                LIMIT 1)
+            </when>
+            <otherwise>NULL</otherwise>
+        </choose>
+        AS myScore,
+        /* 今日签到人次（用 checkin_date，表里专门有这个日期字段做每日去重） */
+        (SELECT COUNT(1) FROM tb_user_checkin c
+        WHERE c.spot_id = s.id AND c.checkin_date = CURDATE()) AS todayCheckinCount,
+        /* 累计签到人次 */
+        (SELECT COUNT(1) FROM tb_user_checkin c
+        WHERE c.spot_id = s.id) AS totalCheckinCount
+        FROM tb_observation_spot s
+        WHERE s.id = #{spotId}
+        AND s.deleted = 0
+        LIMIT 1
     </select>
 
 </mapper>

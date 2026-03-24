@@ -1,35 +1,44 @@
 package com.astronomy.mall.module.location.service.impl;
 
+import com.alibaba.fastjson.JSON;
 import com.astronomy.mall.common.exception.BusinessException;
-import com.astronomy.mall.common.result.ResultCode;
-import com.astronomy.mall.module.location.dto.CheckinDTO;
 import com.astronomy.mall.module.location.dto.SpotRatingDTO;
+import com.astronomy.mall.module.location.entity.ObservationSpot;
+import com.astronomy.mall.module.location.entity.SpotRating;
 import com.astronomy.mall.module.location.mapper.ObservationSpotMapper;
 import com.astronomy.mall.module.location.mapper.SpotRatingMapper;
-import com.astronomy.mall.module.location.mapper.UserCheckinMapper;
 import com.astronomy.mall.module.location.service.LocationService;
-import com.astronomy.mall.module.location.vo.*;
+import com.astronomy.mall.module.location.vo.ObservationSpotVO;
+import com.astronomy.mall.module.location.vo.SpotDetailVO;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
- * 地理位置服务实现类
+ * 地理位置服务实现
  *
- * 📌 6.0 骨架类：
- *   - 方法体暂时抛出 TODO 异常，防止骨架误调
- *   - 月相算法已实现（calculateMoonPhase），6.2节直接调用
- *   - 其余方法在对应节（6.1/6.2/6.3/6.4）填充实现
+ * ⚠️ 实体类字段名对照（避免再次踩坑）:
+ *   entity.spotName            → DB: spot_name
+ *   entity.lightPollutionLevel → DB: light_pollution_level
+ *   entity.ratingCount         → DB: rating_count
+ *   entity.checkinCount        → DB: checkin_count
+ *   entity.deleted             → DB: deleted  （@TableLogic，值1=已删除）
+ *   entity.images              → DB: images   （JSON数组字符串）
+ *   entity.rating              → DB: rating
  *
- * 📌 高德天气API:
- *   Key 在 application.yml 中配置: amap.web-key=2ce80d8a2c6b51db75fd2c6603086432
- *   后端调用，不暴露给前端
+ * 6.1 实现: getSpots / getSpotDetail / submitRating
+ * 6.2 TODO: getWeather / getTonightCondition
+ * 6.3 TODO: checkin / getCheckinHistory
  */
 @Slf4j
 @Service
@@ -39,187 +48,148 @@ public class LocationServiceImpl implements LocationService {
     private ObservationSpotMapper observationSpotMapper;
 
     @Autowired
-    private UserCheckinMapper userCheckinMapper;
-
-    @Autowired
     private SpotRatingMapper spotRatingMapper;
 
-    // TODO 6.3: @Autowired NotificationHelper notificationHelper;
+    // ================================================================
+    // ① 附近观测点列表（6.1）
+    // ================================================================
+
+    @Override
+    public List<ObservationSpotVO> getSpots(
+            Double longitude, Double latitude,
+            Integer radius, Integer limit,
+            String province, String city,
+            Integer maxLightPollution,
+            Long currentUserId) {
+
+        if (longitude == null || latitude == null) {
+            return Collections.emptyList();
+        }
+        if (radius == null || radius <= 0) radius = 100;
+        if (radius > 500) radius = 500;
+        if (limit == null || limit <= 0) limit = 20;
+        if (limit > 50) limit = 50;
+
+        return observationSpotMapper.selectNearbySpots(
+                longitude, latitude, radius, limit,
+                province, city, maxLightPollution, currentUserId
+        );
+    }
+
+    // ================================================================
+    // ② 观测点详情（6.1）
+    // ================================================================
+
+    @Override
+    public SpotDetailVO getSpotDetail(Long spotId, Long currentUserId) {
+        SpotDetailVO detail = observationSpotMapper.selectSpotDetail(spotId, currentUserId);
+        if (detail == null) {
+            throw new BusinessException("观测点不存在或已下架");
+        }
+        // 解析 images JSON 字符串 → List<String>，补充到 detail.images
+        enrichImages(detail, spotId);
+        return detail;
+    }
 
     /**
-     * 高德天气API的Web服务Key（后端专用，不暴露前端）
-     * 配置在 application.yml: amap.web-key
+     * 从 entity 取 images 字段（JSON字符串），解析后填入 VO
      */
-    @Value("${amap.web-key}")
-    private String amapWebKey;
-
-    // ==================== 6.1 观测点 ====================
-
-    @Override
-    public List<ObservationSpotVO> listSpots(String province, String city, Integer maxLightPollution) {
-        // TODO 6.1: 调用 observationSpotMapper.listSpots() 实现
-        throw new BusinessException(ResultCode.ERROR);
+    private void enrichImages(SpotDetailVO detail, Long spotId) {
+        try {
+            ObservationSpot spot = observationSpotMapper.selectById(spotId);
+            if (spot != null && StringUtils.hasText(spot.getImages())) {
+                detail.setImages(JSON.parseArray(spot.getImages(), String.class));
+                // mainImage：若 XML 层没取到，用 images 第一张补
+                if (!StringUtils.hasText(detail.getMainImage()) && !detail.getImages().isEmpty()) {
+                    detail.setMainImage(detail.getImages().get(0));
+                }
+            } else {
+                detail.setImages(Collections.emptyList());
+            }
+        } catch (Exception e) {
+            log.warn("[SpotDetail] 解析图片列表失败, spotId={}", spotId, e);
+            detail.setImages(Collections.emptyList());
+        }
     }
 
-    @Override
-    public SpotDetailVO getSpotDetail(Long spotId, Long userId) {
-        // TODO 6.1: 查询观测点详情 + 当前用户评分状态 + 今日签到状态
-        throw new BusinessException(ResultCode.ERROR);
-    }
+    // ================================================================
+    // ③ 评分提交（6.1）
+    // ================================================================
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void rateSpot(Long spotId, Long userId, SpotRatingDTO dto) {
-        // TODO 6.1:
-        //   1. 检查观测点是否存在
-        //   2. 检查是否已评分（spotRatingMapper.getUserScore()）
-        //   3. 插入评分记录（BaseMapper.insert，依赖uk_user_spot唯一约束兜底防重复）
-        //   4. 重新计算均分和人数（spotRatingMapper.calcAvgRating + countRating）
-        //   5. 更新观测点评分（observationSpotMapper.updateRating）
-        throw new BusinessException(ResultCode.ERROR);
+    public Map<String, Object> submitRating(Long spotId, Long userId, SpotRatingDTO ratingDTO) {
+
+        // 1. 查观测点是否存在
+        // ⚠️ @TableLogic 注解：selectById 会自动加 WHERE deleted=0
+        //    所以直接判断 null 即可，不需要再判断 spot.getDeleted()
+        ObservationSpot spot = observationSpotMapper.selectById(spotId);
+        if (spot == null) {
+            throw new BusinessException("观测点不存在");
+        }
+
+        // 2. 检查是否已评分
+        Integer existingScore = spotRatingMapper.selectUserScore(userId, spotId);
+        if (existingScore != null) {
+            throw new BusinessException("您已对该观测点评过分（" + existingScore + "星），每人每点只能评一次");
+        }
+
+        // 3. 插入评分记录
+        SpotRating rating = new SpotRating();
+        rating.setSpotId(spotId);
+        rating.setUserId(userId);
+        rating.setScore(ratingDTO.getScore());
+        spotRatingMapper.insert(rating);
+
+        // 4. 重新计算并更新观测点平均分+评分人数
+        spotRatingMapper.updateSpotRating(spotId);
+
+        // 5. 重新查最新数据返回前端
+        // ⚠️ @TableLogic 影响：selectById 返回的是逻辑未删除的记录
+        ObservationSpot updated = observationSpotMapper.selectById(spotId);
+
+        Map<String, Object> result = new HashMap<>(4);
+        result.put("newRating",   updated.getRating()      != null ? updated.getRating()      : BigDecimal.ZERO);
+        result.put("ratingCount", updated.getRatingCount() != null ? updated.getRatingCount() : 0);
+        return result;
     }
 
-    // ==================== 6.2 天气+今晚观测条件 ====================
+    // ================================================================
+    // TODO 6.2 / 6.3 占位
+    // ================================================================
 
     @Override
-    public WeatherVO getWeather(String city) {
-        // TODO 6.2:
-        //   调用高德天气API (https://restapi.amap.com/v3/weather/weatherInfo)
-        //   参数: city=city, key=amapWebKey, extensions=base
-        //   解析返回JSON，填充 WeatherVO
-        //   加简单缓存（ConcurrentHashMap，TTL 30分钟，按city为key）
-        throw new BusinessException(ResultCode.AMAP_API_ERROR);
-    }
-
-    @Override
-    public TonightVO getTonight(String city) {
-        // TODO 6.2:
-        //   1. 调用 getWeather(city) 获取天气
-        //   2. 调用 calculateMoonPhase(LocalDate.now()) 获取月相
-        //   3. 综合计算评分（天气50分+月相30分+温度20分）
-        //   4. 填充 TonightVO 并生成建议文字
-        throw new BusinessException(ResultCode.ERROR);
-    }
-
-    // ==================== 6.3 用户签到 ====================
-
-    @Override
-    @Transactional(rollbackFor = Exception.class)
-    public CheckinVO checkin(Long userId, CheckinDTO dto) {
-        // TODO 6.3:
-        //   1. 检查观测点是否存在（deleted=0）
-        //   2. 检查今日是否已签到（uk_user_spot_date 约束兜底，Service层也要提前检查给友好提示）
-        //   3. 获取当前天气快照（getWeather 兜底catch不阻断签到）
-        //   4. 获取月相快照（calculateMoonPhase(LocalDate.now()).moonPhaseName）
-        //   5. 插入签到记录（userCheckinMapper.insert）
-        //   6. 更新签到总次数（observationSpotMapper.incrCheckinCount）
-        //   7. 查询今日签到总人数（userCheckinMapper.countTodayCheckin）
-        //   8. 异步发送签到成功通知（notificationHelper.sendCheckinNotification）
-        //   9. 组装并返回 CheckinVO
-        throw new BusinessException(ResultCode.ERROR);
+    public Object getWeather(Double longitude, Double latitude) {
+        throw new BusinessException("天气功能将在 6.2 节实现");
     }
 
     @Override
-    public List<CheckinVO> listMyCheckins(Long userId, int pageNum, int pageSize) {
-        // TODO 6.3:
-        //   调用 userCheckinMapper.listMyCheckins(userId, (pageNum-1)*pageSize, pageSize)
-        throw new BusinessException(ResultCode.ERROR);
+    public Object getTonightCondition(Double longitude, Double latitude) {
+        throw new BusinessException("今晚评估功能将在 6.2 节实现");
     }
-
-    // ==================== 6.4 地址联动 ====================
 
     @Override
-    public void updateUserLocation(Long userId, Double longitude, Double latitude) {
-        // TODO 6.4:
-        //   UPDATE tb_user SET longitude=#{longitude}, latitude=#{latitude} WHERE id=#{userId}
-        //   注意: 不能通过 UserService.getById().set().save() 方式，
-        //         避免覆盖balance等字段（并发危险）
-        //         使用 Mapper @Update 注解精准更新
-        throw new BusinessException(ResultCode.ERROR);
+    public Object checkin(Long spotId, Double longitude, Double latitude, Long userId) {
+        throw new BusinessException("签到功能将在 6.3 节实现");
     }
 
-    // ==================== 公共工具方法（已实现，6.2直接调用）====================
+    @Override
+    public Object getCheckinHistory(Long userId, Integer pageNum, Integer pageSize) {
+        throw new BusinessException("签到历史功能将在 6.3 节实现");
+    }
+
+    // ================================================================
+    // 月相算法（6.2 用到，提前实现）
+    // ================================================================
 
     /**
-     * 月相计算（纯算法，无需外部API）
-     *
-     * 算法说明:
-     *   基准日: 2000-01-06 为已知新月
-     *   朔望月周期: 29.53059 天
-     *   phase = (距基准天数 % 29.53059) / 29.53059
-     *   illumination = (1 - cos(phase * 2π)) / 2 * 100 (照明百分比)
-     *
-     * 月相名称映射（phase 0.0-1.0）:
-     *   0.00-0.03 = 新月
-     *   0.03-0.22 = 眉月（蛾眉月）
-     *   0.22-0.28 = 上弦月
-     *   0.28-0.47 = 盈凸月
-     *   0.47-0.53 = 满月
-     *   0.53-0.72 = 亏凸月
-     *   0.72-0.78 = 下弦月
-     *   0.78-0.97 = 残月
-     *   0.97-1.00 = 新月
-     *
-     * @param date 目标日期
-     * @return MoonPhaseResult 内部结果对象
+     * 计算月相照明度 0~100%（0=新月最佳观测，100=满月最差观测）
      */
-    public MoonPhaseResult calculateMoonPhase(LocalDate date) {
-        // 基准新月日期: 2000-01-06
-        LocalDate knownNewMoon = LocalDate.of(2000, 1, 6);
-
-        // 计算距基准天数
-        long daysSince = ChronoUnit.DAYS.between(knownNewMoon, date);
-
-        // 朔望月周期
-        final double SYNODIC_MONTH = 29.53059;
-
-        // 计算当前相位（0.0-1.0）
-        double phase = (daysSince % SYNODIC_MONTH) / SYNODIC_MONTH;
-        if (phase < 0) {
-            phase += 1.0; // 保证为正
-        }
-
-        // 计算照明百分比（0-100）
-        int illumination = (int) Math.round((1 - Math.cos(phase * 2 * Math.PI)) / 2 * 100);
-
-        // 月相名称
-        String moonPhaseName;
-        if (phase < 0.03 || phase >= 0.97) {
-            moonPhaseName = "新月";
-        } else if (phase < 0.22) {
-            moonPhaseName = "眉月";
-        } else if (phase < 0.28) {
-            moonPhaseName = "上弦月";
-        } else if (phase < 0.47) {
-            moonPhaseName = "盈凸月";
-        } else if (phase < 0.53) {
-            moonPhaseName = "满月";
-        } else if (phase < 0.72) {
-            moonPhaseName = "亏凸月";
-        } else if (phase < 0.78) {
-            moonPhaseName = "下弦月";
-        } else {
-            moonPhaseName = "残月";
-        }
-
-        return new MoonPhaseResult(moonPhaseName, illumination, phase);
-    }
-
-    /**
-     * 月相计算结果内部类
-     */
-    public static class MoonPhaseResult {
-        /** 月相名称（新月/眉月/上弦月/盈凸月/满月/亏凸月/下弦月/残月） */
-        public final String moonPhaseName;
-        /** 月面照明百分比（0-100，0=新月最佳，100=满月最差） */
-        public final int illumination;
-        /** 相位值（0.0-1.0，内部使用） */
-        public final double phase;
-
-        public MoonPhaseResult(String moonPhaseName, int illumination, double phase) {
-            this.moonPhaseName = moonPhaseName;
-            this.illumination = illumination;
-            this.phase = phase;
-        }
+    public double calculateMoonPhase(LocalDate date) {
+        LocalDate base = LocalDate.of(2000, 1, 6); // 已知新月基准
+        long days = ChronoUnit.DAYS.between(base, date);
+        double phase = (days % 29.53059) / 29.53059;
+        double illumination = (1 - Math.cos(phase * 2 * Math.PI)) / 2 * 100;
+        return Math.round(illumination * 10.0) / 10.0;
     }
 }

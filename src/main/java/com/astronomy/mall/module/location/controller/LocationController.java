@@ -1,10 +1,10 @@
 package com.astronomy.mall.module.location.controller;
 
 import com.astronomy.mall.common.result.Result;
-import com.astronomy.mall.module.location.dto.CheckinDTO;
 import com.astronomy.mall.module.location.dto.SpotRatingDTO;
 import com.astronomy.mall.module.location.service.LocationService;
-import com.astronomy.mall.module.location.vo.*;
+import com.astronomy.mall.module.location.vo.ObservationSpotVO;
+import com.astronomy.mall.module.location.vo.SpotDetailVO;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import io.swagger.annotations.ApiParam;
@@ -15,158 +15,151 @@ import org.springframework.web.bind.annotation.*;
 
 import javax.servlet.http.HttpServletRequest;
 import java.util.List;
+import java.util.Map;
 
 /**
- * 地理位置模块 - 用户端 Controller
- * Base URL: /api/location
+ * 地理位置 Controller
  *
- * 接口清单（8个）:
+ * 接口前缀: /api/location
  *
- * 白名单（无需登录，WebMvcConfig已配置）:
- *   GET  /api/location/spots         6.1 观测点列表+筛选
- *   GET  /api/location/spot/{id}     6.1 观测点详情
- *   GET  /api/location/weather       6.2 实况天气
- *   GET  /api/location/tonight       6.2 今晚观测条件综合评分
+ * ✅ 6.1 已实现 (3个):
+ *   GET  /spots           - 附近观测点列表（公开，无需登录）
+ *   GET  /spot/{id}       - 观测点详情（公开，无需登录）
+ *   POST /spot/{id}/rating - 评分（需登录）
  *
- * 需要登录:
- *   POST /api/location/spot/{id}/rating  6.1 提交评分（防重复）
- *   POST /api/location/checkin           6.3 签到
- *   GET  /api/location/checkin/my        6.3 我的签到足迹
- *   PUT  /api/user/location              6.4 更新用户常用坐标（定义在UserController中）
+ * TODO 6.2 (2个):
+ *   GET  /weather         - 天气+适宜度
+ *   GET  /tonight         - 今晚综合评估
  *
- * 📌 6.0 骨架：方法体仅写结构，业务逻辑在 6.1~6.3 各节填充
+ * TODO 6.3 (2个):
+ *   POST /checkin         - 签到
+ *   GET  /checkin/my      - 我的签到历史
+ *
+ * ⚠️ JWT 白名单（WebMvcConfig.java 已配置）:
+ *   /api/location/spots   ← 已放行（公开）
+ *   /api/location/spot/   ← 前缀已放行（公开，含 spot/{id} 和 spot/{id}/rating 会被匹配？）
+ *
+ * ⚠️ 注意: /spot/{id}/rating 需要登录！
+ *   WebMvcConfig 中白名单写的是 "/api/location/spot/" 前缀匹配，
+ *   实际 Spring excludePathPatterns 不支持通配后缀，
+ *   请确认 WebMvcConfig 里写的是:
+ *     "/api/location/spot/**"  ← 会把 rating 也放行（不需要登录）
+ *   还是:
+ *     "/api/location/spot/{id}" ← 只放行详情
+ *
+ *   ★ 推荐做法：rating接口需要登录，Controller里用 request.getAttribute("userId") 取用户ID
+ *     若取不到（null）说明未登录，返回401。
+ *     白名单只写 /api/location/spots 和 /api/location/spot/* （两种写法对应不同精度）
  */
 @Slf4j
-@Api(tags = "地理位置模块")
 @RestController
-@RequestMapping("/location")
+@RequestMapping("/api/location")
+@Api(tags = "地理位置 - 观测点")
 public class LocationController {
 
     @Autowired
     private LocationService locationService;
 
-    // ==================== 6.1 观测点（白名单接口）====================
+    // ================================================================
+    // ① GET /location/spots - 附近观测点列表（公开，无需登录）
+    // ================================================================
 
-    /**
-     * 获取观测点列表
-     * 白名单，无需登录
-     * GET /api/location/spots?province=&city=&maxLightPollution=
-     *
-     * TODO 6.1: 填充实现
-     */
-    @ApiOperation("获取观测点列表（支持省/市/光污染等级筛选）")
     @GetMapping("/spots")
-    public Result<List<ObservationSpotVO>> listSpots(
-            @ApiParam("省份，可选") @RequestParam(required = false) String province,
-            @ApiParam("城市，可选") @RequestParam(required = false) String city,
-            @ApiParam("最大光污染Bortle等级(1-9)，越小越好，可选") @RequestParam(required = false) Integer maxLightPollution) {
-        List<ObservationSpotVO> list = locationService.listSpots(province, city, maxLightPollution);
-        return Result.success(list);
+    @ApiOperation("获取附近观测点（按距离排序，支持省市/光污染筛选）")
+    public Result<List<ObservationSpotVO>> getNearbySpots(
+            @ApiParam("经度（定位获取或城市中心）") @RequestParam(required = false) Double longitude,
+            @ApiParam("纬度（定位获取或城市中心）") @RequestParam(required = false) Double latitude,
+            @ApiParam("搜索半径(km，默认100，最大500)") @RequestParam(defaultValue = "100") Integer radius,
+            @ApiParam("返回条数（默认20，最大50）") @RequestParam(defaultValue = "20") Integer limit,
+            @ApiParam("省份筛选（可选）") @RequestParam(required = false) String province,
+            @ApiParam("城市筛选（可选）") @RequestParam(required = false) String city,
+            @ApiParam("Bortle等级上限(1-9，可选，传3=只看≤3级暗天)") @RequestParam(required = false) Integer maxLightPollution,
+            HttpServletRequest request) {
+
+        // 当前用户（可能为null，未登录时不影响列表，只影响 myScore 字段）
+        Long currentUserId = (Long) request.getAttribute("userId");
+
+        List<ObservationSpotVO> spots = locationService.getSpots(
+                longitude, latitude, radius, limit,
+                province, city, maxLightPollution, currentUserId
+        );
+
+        return Result.success(spots);
     }
 
-    /**
-     * 获取观测点详情
-     * 白名单，无需登录；有Token时也可识别当前用户评分/签到状态
-     * GET /api/location/spot/{id}
-     *
-     * TODO 6.1: 填充实现
-     */
-    @ApiOperation("获取观测点详情（含当前用户评分和签到状态）")
+    // ================================================================
+    // ② GET /location/spot/{id} - 观测点详情（公开，无需登录）
+    // ================================================================
+
     @GetMapping("/spot/{id}")
+    @ApiOperation("获取观测点详情（含完整描述/图片/签到统计）")
     public Result<SpotDetailVO> getSpotDetail(
             @ApiParam("观测点ID") @PathVariable Long id,
             HttpServletRequest request) {
-        // 尝试获取当前用户（未登录则为null，白名单接口userId可为null）
-        Long userId = (Long) request.getAttribute("userId");
-        SpotDetailVO vo = locationService.getSpotDetail(id, userId);
-        return Result.success(vo);
+
+        Long currentUserId = (Long) request.getAttribute("userId");
+        SpotDetailVO detail = locationService.getSpotDetail(id, currentUserId);
+        return Result.success(detail);
     }
 
-    /**
-     * 提交观测点评分（需要登录）
-     * POST /api/location/spot/{id}/rating
-     * Body: { "score": 5 }
-     *
-     * TODO 6.1: 填充实现
-     */
-    @ApiOperation("提交观测点评分（1-5星，每人每观测点只能评一次）")
+    // ================================================================
+    // ③ POST /location/spot/{id}/rating - 提交评分（需登录）
+    // ================================================================
+
     @PostMapping("/spot/{id}/rating")
-    public Result<Void> rateSpot(
+    @ApiOperation("提交观测点评分（1-5星，每人每点限1次）")
+    public Result<Map<String, Object>> submitRating(
             @ApiParam("观测点ID") @PathVariable Long id,
-            @RequestBody @Validated SpotRatingDTO dto,
+            @Validated @RequestBody SpotRatingDTO ratingDTO,
             HttpServletRequest request) {
+
+        // 评分接口必须登录
         Long userId = (Long) request.getAttribute("userId");
-        locationService.rateSpot(id, userId, dto);
-        return Result.success();
+        if (userId == null) {
+            return Result.error("请先登录后再评分");
+        }
+
+        Map<String, Object> result = locationService.submitRating(id, userId, ratingDTO);
+        return Result.success(result);
     }
 
-    // ==================== 6.2 天气+今晚观测条件（白名单接口）====================
+    // ================================================================
+    // TODO 6.2: 天气接口（占位，返回提示信息）
+    // ================================================================
 
-    /**
-     * 获取实况天气（高德API代理，Key不暴露前端）
-     * 白名单，无需登录
-     * GET /api/location/weather?city=北京
-     *
-     * TODO 6.2: 填充实现
-     */
-    @ApiOperation("获取实况天气（高德天气API代理，Key后端保管）")
     @GetMapping("/weather")
-    public Result<WeatherVO> getWeather(
-            @ApiParam("城市名或高德adcode，例：北京 或 110000") @RequestParam String city) {
-        WeatherVO vo = locationService.getWeather(city);
-        return Result.success(vo);
+    @ApiOperation("TODO 6.2: 天气+观测适宜度（待开发）")
+    public Result<Object> getWeather(
+            @RequestParam(required = false) Double longitude,
+            @RequestParam(required = false) Double latitude) {
+        // TODO 6.2 实现：调用高德天气 API（web-key 后端持有，不暴露前端）
+        return Result.error("天气功能将在 6.2 节实现");
     }
 
-    /**
-     * 获取今晚观测条件综合评分
-     * 白名单，无需登录
-     * GET /api/location/tonight?city=北京
-     *
-     * TODO 6.2: 填充实现
-     */
-    @ApiOperation("获取今晚观测综合评分（天气+月相+温度综合计算）")
     @GetMapping("/tonight")
-    public Result<TonightVO> getTonight(
-            @ApiParam("城市名或高德adcode") @RequestParam String city) {
-        TonightVO vo = locationService.getTonight(city);
-        return Result.success(vo);
+    @ApiOperation("TODO 6.2: 今晚综合观测评估（待开发）")
+    public Result<Object> getTonightCondition(
+            @RequestParam(required = false) Double longitude,
+            @RequestParam(required = false) Double latitude) {
+        // TODO 6.2 实现：天气×0.6 + 月相×0.4 综合评分
+        return Result.error("今晚评估功能将在 6.2 节实现");
     }
 
-    // ==================== 6.3 用户签到（需要登录）====================
+    // ================================================================
+    // TODO 6.3: 签到接口（占位，返回提示信息）
+    // ================================================================
 
-    /**
-     * 用户签到
-     * 需要登录，每日同一观测点只能签到一次
-     * POST /api/location/checkin
-     * Body: { "spotId": 1, "longitude": 116.4, "latitude": 39.9 }
-     *
-     * TODO 6.3: 填充实现
-     */
-    @ApiOperation("用户观测点签到（每日每观测点限一次）")
     @PostMapping("/checkin")
-    public Result<CheckinVO> checkin(
-            @RequestBody @Validated CheckinDTO dto,
-            HttpServletRequest request) {
-        Long userId = (Long) request.getAttribute("userId");
-        CheckinVO vo = locationService.checkin(userId, dto);
-        return Result.success(vo);
+    @ApiOperation("TODO 6.3: 观测点签到（待开发）")
+    public Result<Object> checkin(HttpServletRequest request) {
+        // TODO 6.3 实现：距离≤5km + 每日每点去重 + 发签到通知
+        return Result.error("签到功能将在 6.3 节实现");
     }
 
-    /**
-     * 我的签到足迹（分页）
-     * 需要登录
-     * GET /api/location/checkin/my?pageNum=1&pageSize=10
-     *
-     * TODO 6.3: 填充实现
-     */
-    @ApiOperation("我的签到足迹（分页，按时间倒序）")
     @GetMapping("/checkin/my")
-    public Result<List<CheckinVO>> listMyCheckins(
-            @ApiParam("页码，从1开始") @RequestParam(defaultValue = "1") int pageNum,
-            @ApiParam("每页数量") @RequestParam(defaultValue = "10") int pageSize,
-            HttpServletRequest request) {
-        Long userId = (Long) request.getAttribute("userId");
-        List<CheckinVO> list = locationService.listMyCheckins(userId, pageNum, pageSize);
-        return Result.success(list);
+    @ApiOperation("TODO 6.3: 我的签到历史（待开发）")
+    public Result<Object> getCheckinHistory(HttpServletRequest request) {
+        // TODO 6.3 实现：分页查询 tb_user_checkin，含天气/月相快照
+        return Result.error("签到历史功能将在 6.3 节实现");
     }
 }

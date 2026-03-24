@@ -2,58 +2,66 @@ package com.astronomy.mall.module.location.mapper;
 
 import com.astronomy.mall.module.location.entity.ObservationSpot;
 import com.astronomy.mall.module.location.vo.ObservationSpotVO;
+import com.astronomy.mall.module.location.vo.SpotDetailVO;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
-import org.apache.ibatis.annotations.Update;
 
-import java.math.BigDecimal;
 import java.util.List;
 
 /**
- * 观测点Mapper
- * 对应表: tb_observation_spot
+ * 观测点 Mapper
  *
- * 📌 6.0 骨架类，业务SQL在 6.1~6.5 各节填充
- *    @Update 注解方法在此处定义，无需XML
+ * 继承 BaseMapper<ObservationSpot> 获得通用 CRUD
+ *
+ * 自定义方法说明:
+ *   selectNearbySpots  - Haversine公式计算距离 + 省市/光污染多条件筛选 + 距离排序
+ *   selectSpotDetail   - 查单个观测点详情，含 myScore（当前用户评分）和签到统计
+ *
+ * XML位置: resources/mapper/xml/ObservationSpotMapper.xml
  */
+@Mapper
 public interface ObservationSpotMapper extends BaseMapper<ObservationSpot> {
 
     /**
-     * 更新观测点综合评分和评分人数
-     * 在 SpotRatingMapper.insertRating() 成功后调用
+     * 查询附近观测点（Haversine公式计算距离，按距离升序排列）
      *
-     * @param spotId     观测点ID
-     * @param avgRating  新的平均分（由Service层计算）
-     * @param ratingCount 新的评分人数
-     *
-     * 📌 TODO 6.1: 由 LocationServiceImpl.rateSpot() 调用
+     * @param longitude         查询中心经度
+     * @param latitude          查询中心纬度
+     * @param radius            搜索半径（km，默认100）
+     * @param limit             返回条数上限（默认20）
+     * @param province          省份筛选（可为null，null时不筛选）
+     * @param city              城市筛选（可为null，null时不筛选）
+     * @param maxLightPollution Bortle等级上限（可为null，null时不筛选；1=最暗，9=最亮，传3表示只看≤3级暗天）
+     * @param currentUserId     当前登录用户ID（用于查询 myScore，未登录传null）
+     * @return 按距离升序的观测点列表
      */
-    @Update("UPDATE tb_observation_spot SET rating=#{avgRating}, rating_count=#{ratingCount} " +
-            "WHERE id=#{spotId} AND deleted=0")
-    void updateRating(@Param("spotId") Long spotId,
-                      @Param("avgRating") BigDecimal avgRating,
-                      @Param("ratingCount") int ratingCount);
+    List<ObservationSpotVO> selectNearbySpots(
+            @Param("longitude") Double longitude,
+            @Param("latitude") Double latitude,
+            @Param("radius") Integer radius,
+            @Param("limit") Integer limit,
+            @Param("province") String province,
+            @Param("city") String city,
+            @Param("maxLightPollution") Integer maxLightPollution,
+            @Param("currentUserId") Long currentUserId
+    );
 
     /**
-     * 签到成功后，观测点总签到次数+1
+     * 查询单个观测点详情
+     * 含:
+     *   - 完整描述（full_description）
+     *   - 图片列表（images JSON字符串，Service层解析）
+     *   - 当前用户评分 myScore（currentUserId为null时返回null）
+     *   - 今日签到人数 todayCheckinCount
+     *   - 累计签到总数 totalCheckinCount
      *
-     * 📌 TODO 6.3: 由 LocationServiceImpl.checkin() 调用
+     * @param spotId        观测点ID
+     * @param currentUserId 当前登录用户ID（未登录传null）
+     * @return 观测点详情VO（找不到返回null）
      */
-    @Update("UPDATE tb_observation_spot SET checkin_count=checkin_count+1 WHERE id=#{spotId} AND deleted=0")
-    void incrCheckinCount(@Param("spotId") Long spotId);
-
-    /**
-     * 观测点列表查询（带筛选）
-     * SQL 在 ObservationSpotMapper.xml 中实现
-     *
-     * 📌 TODO 6.1: 填充XML中的 SQL
-     *
-     * @param province             省份（可为null）
-     * @param city                 城市（可为null）
-     * @param maxLightPollution    最大光污染等级（可为null）
-     * @return 观测点VO列表
-     */
-    List<ObservationSpotVO> listSpots(@Param("province") String province,
-                                      @Param("city") String city,
-                                      @Param("maxLightPollution") Integer maxLightPollution);
+    SpotDetailVO selectSpotDetail(
+            @Param("spotId") Long spotId,
+            @Param("currentUserId") Long currentUserId
+    );
 }

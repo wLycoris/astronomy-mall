@@ -25,6 +25,10 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  *         ⚠️ 不在 excludePathPatterns 中配置课程路径！否则拦截器不执行，进度无法记录
  * - 6.0   新增地理位置模块4条公开接口白名单（spots/spot详情/weather/tonight）
  *         checkin 和 rating 接口需要登录，不加白名单
+ * - 6.1   修复: /api/location/spot/ → /api/location/spot/*
+ *         Spring excludePathPatterns 不支持纯前缀匹配，必须加通配符
+ *         /api/location/spot/* 可匹配 /spot/1、/spot/35 等带ID路径
+ *         ⚠️ 不用 /api/location/spot/** 避免把 /spot/{id}/rating 也放行
  */
 @Configuration
 public class WebMvcConfig implements WebMvcConfigurer {
@@ -52,28 +56,28 @@ public class WebMvcConfig implements WebMvcConfigurer {
                         // ✅ 2.7.1 NASA API 公开接口（商城首页 ApodCard 无需登录）
                         "/api/nasa/**",
                         // ❌ 课程接口不在此处！由 JwtInterceptor.OPTIONAL_AUTH_LIST 处理
-                        // 游客放行 + 登录用户解析Token，两者兼顾
 
-                        // ✅ 6.0 地理位置模块公开接口（无需登录即可查看观测点和天气）
-                        // ⚠️ checkin(签到) 和 spot/{id}/rating(评分) 需要登录，不在此处！
+                        // ✅ 6.0/6.1 地理位置模块公开接口
+                        // ⚠️ checkin 和 spot/{id}/rating 需要登录，不在此处！
                         "/api/location/spots",      // 观测点列表（含筛选）
-                        "/api/location/spot/",      // 观测点详情 /spot/{id}（用前缀匹配）
+                        "/api/location/spot/*",     // ✅ 修复：* 匹配 /spot/1 /spot/35 等详情接口
+                        //    原来写 /spot/ 前缀不生效，所以详情报401
                         "/api/location/weather",    // 实况天气查询
                         "/api/location/tonight"     // 今晚观测条件综合评分
                 )
-                .order(1); // 第一个执行
+                .order(1);
 
         // ============================================
         // 2. 管理员权限拦截器 (验证管理员)
         // ============================================
         registry.addInterceptor(adminInterceptor)
-                .addPathPatterns("/api/admin/**") // 只拦截管理员接口
+                .addPathPatterns("/api/admin/**")
                 .excludePathPatterns(
-                        "/api/admin/setting/maintenance",  // 🆕 维护模式公开查询
-                        "/api/admin/setting/register",     // 🆕 注册开关公开查询
-                        "/api/admin/setting/payment"       // 🆕 支付方式公开查询
+                        "/api/admin/setting/maintenance",
+                        "/api/admin/setting/register",
+                        "/api/admin/setting/payment"
                 )
-                .order(2); // 第二个执行
+                .order(2);
     }
 
     @Override

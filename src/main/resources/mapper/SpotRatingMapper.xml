@@ -2,24 +2,38 @@
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 
-<!--
-    SpotRatingMapper.xml
-    对应接口: com.astronomy.mall.module.location.mapper.SpotRatingMapper
-    文件位置: src/main/resources/mapper/xml/SpotRatingMapper.xml
-
-    📌 SpotRatingMapper 的3个方法全部使用 @Select/@Update 注解实现，无需XML中写SQL
-       - calcAvgRating()  → @Select 注解
-       - countRating()    → @Select 注解
-       - getUserScore()   → @Select 注解
-
-    📌 此XML文件仅作为 MyBatis 命名空间注册，保持与其他Mapper文件结构一致
-       BaseMapper 的 insert/delete/update/select 由 MyBatis-Plus 自动提供，无需手写
--->
 <mapper namespace="com.astronomy.mall.module.location.mapper.SpotRatingMapper">
 
     <!--
-        6.0 骨架：当前无需自定义SQL，所有方法已用注解实现
-        TODO 6.1: 如有复杂查询需求可在此扩展
+        SpotRatingMapper.xml
+        文件位置: src/main/resources/mapper/xml/SpotRatingMapper.xml
+
+        核心方法: updateSpotRating
+          - 在新评分插入后调用（LocationServiceImpl.submitRating）
+          - 用 AVG(score) 子查询直接更新，保证并发安全（数据库原子操作）
+          - COALESCE 处理无评分时返回 NULL 的情况，置为 0.0 / 0
     -->
+
+    <!--
+        updateSpotRating - 重新计算并写回平均分+评分人数
+        ⚠️ 用子查询保证计算结果与写回之间不丢失并发评分
+    -->
+    <update id="updateSpotRating">
+        UPDATE tb_observation_spot
+        SET
+            rating = (
+                SELECT COALESCE(ROUND(AVG(r.score), 1), 0.0)
+                FROM tb_spot_rating r
+                WHERE r.spot_id = #{spotId}
+            ),
+            rating_count = (
+                SELECT COUNT(1)
+                FROM tb_spot_rating r
+                WHERE r.spot_id = #{spotId}
+            ),
+            update_time = NOW()
+        WHERE id = #{spotId}
+          AND deleted = 0
+    </update>
 
 </mapper>
