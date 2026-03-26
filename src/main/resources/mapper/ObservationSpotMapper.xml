@@ -122,7 +122,37 @@
         WHERE c.spot_id = s.id AND c.checkin_date = CURDATE()) AS todayCheckinCount,
         /* 累计签到人次 */
         (SELECT COUNT(1) FROM tb_user_checkin c
-        WHERE c.spot_id = s.id) AS totalCheckinCount
+        WHERE c.spot_id = s.id) AS totalCheckinCount,
+        /* 当前用户今日是否已签到 */
+        <choose>
+            <when test="currentUserId != null">
+                (SELECT CASE WHEN COUNT(1) > 0 THEN 1 ELSE 0 END
+                FROM tb_user_checkin c
+                WHERE c.user_id = #{currentUserId} AND c.spot_id = s.id AND c.checkin_date = CURDATE())
+            </when>
+            <otherwise>0</otherwise>
+        </choose>
+        AS todayCheckedIn,
+        /* 当前用户今日签到的天气快照 */
+        <choose>
+            <when test="currentUserId != null">
+                (SELECT c.weather FROM tb_user_checkin c
+                WHERE c.user_id = #{currentUserId} AND c.spot_id = s.id AND c.checkin_date = CURDATE()
+                LIMIT 1)
+            </when>
+            <otherwise>NULL</otherwise>
+        </choose>
+        AS checkinWeather,
+        /* 当前用户今日签到的月相快照 */
+        <choose>
+            <when test="currentUserId != null">
+                (SELECT c.moon_phase FROM tb_user_checkin c
+                WHERE c.user_id = #{currentUserId} AND c.spot_id = s.id AND c.checkin_date = CURDATE()
+                LIMIT 1)
+            </when>
+            <otherwise>NULL</otherwise>
+        </choose>
+        AS checkinMoonPhase
         FROM tb_observation_spot s
         WHERE s.id = #{spotId}
         AND s.deleted = 0

@@ -7,13 +7,17 @@ import com.astronomy.mall.common.exception.BusinessException;
 import com.astronomy.mall.module.location.dto.SpotRatingDTO;
 import com.astronomy.mall.module.location.entity.ObservationSpot;
 import com.astronomy.mall.module.location.entity.SpotRating;
+import com.astronomy.mall.module.location.entity.UserCheckin;
 import com.astronomy.mall.module.location.mapper.ObservationSpotMapper;
 import com.astronomy.mall.module.location.mapper.SpotRatingMapper;
+import com.astronomy.mall.module.location.mapper.UserCheckinMapper;
 import com.astronomy.mall.module.location.service.LocationService;
+import com.astronomy.mall.module.location.vo.CheckinVO;
 import com.astronomy.mall.module.location.vo.ObservationSpotVO;
 import com.astronomy.mall.module.location.vo.SpotDetailVO;
 import com.astronomy.mall.module.location.vo.WeatherVO;
 import com.astronomy.mall.module.location.vo.TonightVO;
+import com.astronomy.mall.module.notification.helper.NotificationHelper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -43,8 +47,8 @@ import java.util.Map;
  *   entity.rating              → DB: rating
  *
  * 6.1 实现: getSpots / getSpotDetail / submitRating
- * 6.2 TODO: getWeather / getTonightCondition
- * 6.3 TODO: checkin / getCheckinHistory
+ * 6.2 实现: getWeather / getTonightCondition
+ * 6.3 实现: checkin / getCheckinHistory
  */
 @Slf4j
 @Service
@@ -59,6 +63,12 @@ public class LocationServiceImpl implements LocationService {
 
     @Autowired
     private SpotRatingMapper spotRatingMapper;
+
+    @Autowired
+    private UserCheckinMapper userCheckinMapper;
+
+    @Autowired
+    private NotificationHelper notificationHelper;
 
     /** 用于调用高德天气API */
     private final RestTemplate restTemplate = new RestTemplate();
@@ -141,18 +151,26 @@ public class LocationServiceImpl implements LocationService {
             throw new BusinessException("观测点不存在");
         }
 
-        // 2. 检查是否已评分
+        // 2. 检查是否已评分 → 已评过则更新，未评过则新增
         Integer existingScore = spotRatingMapper.selectUserScore(userId, spotId);
         if (existingScore != null) {
-            throw new BusinessException("您已对该观测点评过分（" + existingScore + "星），每人每点只能评一次");
+            // 已评分 → 更新评分（支持修改）
+            com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<SpotRating> uw =
+                    new com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper<>();
+            uw.eq("user_id", userId).eq("spot_id", spotId);
+            SpotRating updateRating = new SpotRating();
+            updateRating.setScore(ratingDTO.getScore());
+            spotRatingMapper.update(updateRating, uw);
+            log.info("[Rating] 用户修改评分: userId={}, spotId={}, {}星→{}星",
+                    userId, spotId, existingScore, ratingDTO.getScore());
+        } else {
+            // 未评分 → 新增
+            SpotRating rating = new SpotRating();
+            rating.setSpotId(spotId);
+            rating.setUserId(userId);
+            rating.setScore(ratingDTO.getScore());
+            spotRatingMapper.insert(rating);
         }
-
-        // 3. 插入评分记录
-        SpotRating rating = new SpotRating();
-        rating.setSpotId(spotId);
-        rating.setUserId(userId);
-        rating.setScore(ratingDTO.getScore());
-        spotRatingMapper.insert(rating);
 
         // 4. 重新计算并更新观测点平均分+评分人数
         spotRatingMapper.updateSpotRating(spotId);
@@ -300,17 +318,129 @@ public class LocationServiceImpl implements LocationService {
     }
 
     // ================================================================
-    // TODO 6.3 占位
+    // ⑥ 观测点签到（6.3 ✅）
     // ================================================================
 
     @Override
-    public Object checkin(Long spotId, Double longitude, Double latitude, Long userId) {
-        throw new BusinessException("签到功能将在 6.3 节实现");
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> checkin(Long spotId, Double longitude, Double latitude, Long userId) {
+        // 1. 查询观测点（@TableLogic 自动过滤 deleted=1）
+        ObservationSpot spot = observationSpotMapper.selectById(spotId);
+        if (spot == null) {
+            throw new BusinessException("观测点不存在或已下架");
+        }
+
+        // 2. 距离校验：Haversine 计算用户与观测点距离，>5km 拒绝签到
+        if (longitude != null && latitude != null) {
+            double dist = haversineKm(
+                    latitude, longitude,
+                    spot.getLatitude().doubleValue(), spot.getLongitude().doubleValue()
+            );
+            if (dist > 5.0) {
+                throw new BusinessException(String.format("距离观测点 %.1f km，需在 5km 内才能签到", dist));
+            }
+        }
+
+        // 3. 每日每点去重：查唯一键 uk_user_spot_date
+        LocalDate today = LocalDate.now();
+        com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<UserCheckin> qw =
+                new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<>();
+        qw.eq("user_id", userId).eq("spot_id", spotId).eq("checkin_date", today);
+        Long existCount = userCheckinMapper.selectCount(qw);
+        if (existCount != null && existCount > 0) {
+            throw new BusinessException("今日已在该观测点签到，明天再来吧");
+        }
+
+        // 4. 获取天气/月相快照（签到时记录，用于足迹展示）
+        String weatherSnapshot = "";
+        String moonPhaseSnapshot = "";
+        try {
+            if (longitude != null && latitude != null) {
+                WeatherVO weather = getWeather(longitude, latitude);
+                weatherSnapshot = weather.getCondition();
+            }
+        } catch (Exception e) {
+            log.warn("[Checkin] 获取天气快照失败，不影响签到: {}", e.getMessage());
+        }
+        try {
+            double phase = calculateMoonPhaseValue(today);
+            moonPhaseSnapshot = getMoonPhaseName(phase);
+        } catch (Exception e) {
+            log.warn("[Checkin] 获取月相快照失败: {}", e.getMessage());
+        }
+
+        // 5. 插入签到记录
+        UserCheckin checkin = new UserCheckin();
+        checkin.setUserId(userId);
+        checkin.setSpotId(spotId);
+        checkin.setLongitude(longitude != null ? BigDecimal.valueOf(longitude) : null);
+        checkin.setLatitude(latitude != null ? BigDecimal.valueOf(latitude) : null);
+        checkin.setWeather(weatherSnapshot);
+        checkin.setMoonPhase(moonPhaseSnapshot);
+        checkin.setCheckinDate(today);
+        userCheckinMapper.insert(checkin);
+
+        // 6. 更新观测点签到计数 +1
+        ObservationSpot update = new ObservationSpot();
+        update.setId(spotId);
+        update.setCheckinCount(spot.getCheckinCount() != null ? spot.getCheckinCount() + 1 : 1);
+        observationSpotMapper.updateById(update);
+
+        // 7. 查今日该观测点签到总人数
+        int todayCount = userCheckinMapper.countTodayCheckin(spotId, today);
+
+        // 8. 异步发签到通知（不影响主流程）
+        try {
+            notificationHelper.sendCheckinNotification(userId, spot.getSpotName(), spotId, todayCount);
+        } catch (Exception e) {
+            log.warn("[Checkin] 发送签到通知失败: {}", e.getMessage());
+        }
+
+        // 9. 返回结果
+        Map<String, Object> result = new HashMap<>(4);
+        result.put("todayCheckinCount", todayCount);
+        result.put("weather", weatherSnapshot);
+        result.put("moonPhaseName", moonPhaseSnapshot);
+
+        log.info("[Checkin] 签到成功: userId={}, spotId={}, spotName={}, todayCount={}",
+                userId, spotId, spot.getSpotName(), todayCount);
+        return result;
     }
 
+    // ================================================================
+    // ⑦ 我的签到历史（6.3 ✅）
+    // ================================================================
+
     @Override
-    public Object getCheckinHistory(Long userId, Integer pageNum, Integer pageSize) {
-        throw new BusinessException("签到历史功能将在 6.3 节实现");
+    public Map<String, Object> getCheckinHistory(Long userId, Integer pageNum, Integer pageSize) {
+        if (pageNum == null || pageNum < 1) pageNum = 1;
+        if (pageSize == null || pageSize < 1) pageSize = 10;
+        if (pageSize > 50) pageSize = 50;
+
+        int offset = (pageNum - 1) * pageSize;
+        List<CheckinVO> list = userCheckinMapper.listMyCheckins(userId, offset, pageSize);
+        int total = userCheckinMapper.countByUserId(userId);
+
+        Map<String, Object> result = new HashMap<>(4);
+        result.put("list", list);
+        result.put("total", total);
+        result.put("pageNum", pageNum);
+        result.put("pageSize", pageSize);
+        return result;
+    }
+
+    /**
+     * Haversine 公式计算两点距离（km）
+     */
+    private double haversineKm(double lat1, double lng1, double lat2, double lng2) {
+        double R = 6371.0; // 地球半径 km
+        double dLat = Math.toRadians(lat2 - lat1);
+        double dLng = Math.toRadians(lng2 - lng1);
+        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+                + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2))
+                * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return R * c;
     }
 
     // ================================================================

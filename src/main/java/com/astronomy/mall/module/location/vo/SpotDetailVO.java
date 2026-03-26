@@ -69,5 +69,14 @@ public class SpotDetailVO {
     /** 累计签到人次 */
     private Integer totalCheckinCount;
 
+    /** 当前用户今日是否已签到（未登录为 false） */
+    private Boolean todayCheckedIn;
+
+    /** 当前用户今日签到时的天气快照（未签到为 null） */
+    private String checkinWeather;
+
+    /** 当前用户今日签到时的月相快照（未签到为 null） */
+    private String checkinMoonPhase;
+
     private LocalDateTime createTime;
 }

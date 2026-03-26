@@ -1,6 +1,7 @@
 package com.astronomy.mall.module.location.service;
 
 import com.astronomy.mall.module.location.dto.SpotRatingDTO;
+import com.astronomy.mall.module.location.vo.CheckinVO;
 import com.astronomy.mall.module.location.vo.ObservationSpotVO;
 import com.astronomy.mall.module.location.vo.SpotDetailVO;
 import com.astronomy.mall.module.location.vo.WeatherVO;
@@ -61,10 +62,18 @@ public interface LocationService {
     TonightVO getTonightCondition(Double longitude, Double latitude);
 
     // ==============================
-    // 6.3 签到（TODO）
+    // 6.3 签到与我的足迹（✅ 已实现）
     // ==============================
 
-    Object checkin(Long spotId, Double longitude, Double latitude, Long userId);
+    /**
+     * 观测点签到（距离≤5km + 每日每点去重 + 天气/月相快照 + 通知）
+     * 返回: CheckinResultMap { todayCheckinCount, weather, moonPhaseName }
+     */
+    Map<String, Object> checkin(Long spotId, Double longitude, Double latitude, Long userId);
 
-    Object getCheckinHistory(Long userId, Integer pageNum, Integer pageSize);
+    /**
+     * 我的签到历史（分页，含观测点名称/天气/月相快照）
+     * 返回: Map { list, total, pageNum, pageSize }
+     */
+    Map<String, Object> getCheckinHistory(Long userId, Integer pageNum, Integer pageSize);
 }

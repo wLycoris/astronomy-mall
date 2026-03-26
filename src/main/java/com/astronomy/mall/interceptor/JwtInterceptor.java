@@ -72,7 +72,8 @@ public class JwtInterceptor implements HandlerInterceptor {
     private static final List<String> OPTIONAL_AUTH_LIST = Arrays.asList(
             "/api/course/list",
             "/api/course/chapter/",
-            "/api/course/"          // 匹配 /api/course/{id} 详情
+            "/api/course/",          // 匹配 /api/course/{id} 详情
+            "/api/location/spot/"    // 6.3: 观测点详情可选认证，登录后可获取myScore和签到状态
     );
 
     @Override

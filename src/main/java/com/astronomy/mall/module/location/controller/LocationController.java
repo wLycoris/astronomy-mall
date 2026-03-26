@@ -1,6 +1,7 @@
 package com.astronomy.mall.module.location.controller;
 
 import com.astronomy.mall.common.result.Result;
+import com.astronomy.mall.module.location.dto.CheckinDTO;
 import com.astronomy.mall.module.location.dto.SpotRatingDTO;
 import com.astronomy.mall.module.location.service.LocationService;
 import com.astronomy.mall.module.location.vo.ObservationSpotVO;
@@ -33,9 +34,9 @@ import java.util.Map;
  *   GET  /weather         - 天气+适宜度（调用高德天气API）
  *   GET  /tonight         - 今晚综合评估（天气×0.6 + 月相×0.4）
  *
- * TODO 6.3 (2个):
- *   POST /checkin         - 签到
- *   GET  /checkin/my      - 我的签到历史
+ * ✅ 6.3 已实现 (2个):
+ *   POST /checkin         - 签到（距离≤5km + 每日去重 + 天气月相快照 + 通知）
+ *   GET  /checkin/my      - 我的签到历史（分页）
  *
  * ⚠️ JWT 白名单（WebMvcConfig.java 已配置）:
  *   /api/location/spots   ← 已放行（公开）
@@ -152,20 +153,45 @@ public class LocationController {
     }
 
     // ================================================================
-    // TODO 6.3: 签到接口（占位，返回提示信息）
+    // ⑥ POST /location/checkin - 观测点签到（6.3 ✅，需登录）
     // ================================================================
 
     @PostMapping("/checkin")
-    @ApiOperation("TODO 6.3: 观测点签到（待开发）")
-    public Result<Object> checkin(HttpServletRequest request) {
-        // TODO 6.3 实现：距离≤5km + 每日每点去重 + 发签到通知
-        return Result.error("签到功能将在 6.3 节实现");
+    @ApiOperation("观测点签到（距离≤5km + 每日去重 + 天气月相快照，需登录）")
+    public Result<Map<String, Object>> checkin(
+            @Validated @RequestBody CheckinDTO dto,
+            HttpServletRequest request) {
+
+        Long userId = (Long) request.getAttribute("userId");
+        if (userId == null) {
+            return Result.error("请先登录后再签到");
+        }
+
+        // DTO 中 longitude/latitude 为 BigDecimal，转 Double 供 Service 使用
+        Double lng = dto.getLongitude() != null ? dto.getLongitude().doubleValue() : null;
+        Double lat = dto.getLatitude() != null ? dto.getLatitude().doubleValue() : null;
+
+        Map<String, Object> result = locationService.checkin(dto.getSpotId(), lng, lat, userId);
+        return Result.success(result);
     }
 
+    // ================================================================
+    // ⑦ GET /location/checkin/my - 我的签到历史（6.3 ✅，需登录）
+    // ================================================================
+
     @GetMapping("/checkin/my")
-    @ApiOperation("TODO 6.3: 我的签到历史（待开发）")
-    public Result<Object> getCheckinHistory(HttpServletRequest request) {
-        // TODO 6.3 实现：分页查询 tb_user_checkin，含天气/月相快照
-        return Result.error("签到历史功能将在 6.3 节实现");
+    @ApiOperation("我的签到历史（分页，含天气/月相快照，需登录）")
+    public Result<Map<String, Object>> getCheckinHistory(
+            @ApiParam("页码（默认1）") @RequestParam(defaultValue = "1") Integer pageNum,
+            @ApiParam("每页条数（默认10）") @RequestParam(defaultValue = "10") Integer pageSize,
+            HttpServletRequest request) {
+
+        Long userId = (Long) request.getAttribute("userId");
+        if (userId == null) {
+            return Result.error("请先登录");
+        }
+
+        Map<String, Object> result = locationService.getCheckinHistory(userId, pageNum, pageSize);
+        return Result.success(result);
     }
 }

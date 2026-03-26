@@ -59,9 +59,9 @@ public class WebMvcConfig implements WebMvcConfigurer {
 
                         // ✅ 6.0/6.1 地理位置模块公开接口
                         // ⚠️ checkin 和 spot/{id}/rating 需要登录，不在此处！
+                        // ⚠️ /api/location/spot/* 改为可选认证（JwtInterceptor.OPTIONAL_AUTH_LIST）
+                        //    以便登录用户能拿到 myScore 和签到状态
                         "/api/location/spots",      // 观测点列表（含筛选）
-                        "/api/location/spot/*",     // ✅ 修复：* 匹配 /spot/1 /spot/35 等详情接口
-                        //    原来写 /spot/ 前缀不生效，所以详情报401
                         "/api/location/weather",    // 实况天气查询
                         "/api/location/tonight"     // 今晚观测条件综合评分
                 )
