@@ -221,6 +221,23 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         log.info("用户 [{}] 通过新接口修改密码成功", userId);
     }
 
+    /**
+     * 6.4 地址联动：更新用户经纬度
+     * 前端通过 navigator.geolocation 获取坐标后调用此接口保存
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void updateLocation(Long userId, java.math.BigDecimal longitude, java.math.BigDecimal latitude) {
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            throw new BusinessException(ResultCode.USER_NOT_EXIST);
+        }
+        user.setLongitude(longitude);
+        user.setLatitude(latitude);
+        userMapper.updateById(user);
+        log.info("用户 [{}] 更新定位: lng={}, lat={}", userId, longitude, latitude);
+    }
+
     @Override
     public User getUserByUsername(String username) {
         LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>();

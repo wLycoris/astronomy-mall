@@ -46,6 +46,15 @@ public interface UserService extends IService<User> {
     void changePasswordSecure(Long userId, ChangePasswordDTO dto);
 
     /**
+     * 更新用户经纬度（6.4 地址联动：前端定位后回传坐标）
+     *
+     * @param userId    当前登录用户ID
+     * @param longitude 经度
+     * @param latitude  纬度
+     */
+    void updateLocation(Long userId, java.math.BigDecimal longitude, java.math.BigDecimal latitude);
+
+    /**
      * 根据用户名查询用户
      */
     User getUserByUsername(String username);

@@ -107,6 +107,25 @@ public class UserController {
     }
 
     /**
+     * 6.4 地址联动：更新用户经纬度
+     * PUT /api/user/location
+     * 前端通过浏览器定位获取坐标后调用此接口保存到用户表
+     */
+    @PutMapping("/location")
+    @ApiOperation("更新用户经纬度(地址联动)")
+    public Result<String> updateLocation(@RequestBody java.util.Map<String, java.math.BigDecimal> body,
+                                         HttpServletRequest request) {
+        Long userId = getUserIdFromRequest(request);
+        java.math.BigDecimal longitude = body.get("longitude");
+        java.math.BigDecimal latitude = body.get("latitude");
+        if (longitude == null || latitude == null) {
+            return Result.error("经纬度不能为空");
+        }
+        userService.updateLocation(userId, longitude, latitude);
+        return Result.success("定位更新成功");
+    }
+
+    /**
      * 用户登出
      */
     @PostMapping("/logout")
