@@ -8,6 +8,7 @@ import org.apache.ibatis.annotations.Select;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 用户签到记录Mapper
@@ -53,4 +54,28 @@ public interface UserCheckinMapper extends BaseMapper<UserCheckin> {
      */
     @Select("SELECT COUNT(*) FROM tb_user_checkin WHERE user_id=#{userId}")
     int countByUserId(@Param("userId") Long userId);
+
+    /**
+     * 6.5: 查询某观测点在指定日期之后的签到次数
+     * 用于管理员端签到统计（近7日/近30日）
+     *
+     * @param spotId    观测点ID
+     * @param afterDate 起始日期（不含）
+     * @return 签到次数
+     */
+    @Select("SELECT COUNT(*) FROM tb_user_checkin WHERE spot_id=#{spotId} AND checkin_date >= #{afterDate}")
+    int countBySpotIdAfterDate(@Param("spotId") Long spotId, @Param("afterDate") LocalDate afterDate);
+
+    /**
+     * 6.5: 查询某观测点签到次数TOP N的用户
+     * 用于管理员端签到统计弹窗
+     *
+     * @param spotId 观测点ID
+     * @param limit  返回条数
+     * @return 用户ID + 签到次数列表
+     */
+    @Select("SELECT user_id AS userId, COUNT(*) AS checkinCount " +
+            "FROM tb_user_checkin WHERE spot_id=#{spotId} " +
+            "GROUP BY user_id ORDER BY checkinCount DESC LIMIT #{limit}")
+    List<Map<String, Object>> selectTopUsersBySpotId(@Param("spotId") Long spotId, @Param("limit") int limit);
 }
