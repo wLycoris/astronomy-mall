@@ -3,6 +3,8 @@ package com.astronomy.mall.module.location.service;
 import com.astronomy.mall.module.location.dto.SpotRatingDTO;
 import com.astronomy.mall.module.location.vo.ObservationSpotVO;
 import com.astronomy.mall.module.location.vo.SpotDetailVO;
+import com.astronomy.mall.module.location.vo.WeatherVO;
+import com.astronomy.mall.module.location.vo.TonightVO;
 
 import java.util.List;
 import java.util.Map;
@@ -43,12 +45,20 @@ public interface LocationService {
     Map<String, Object> submitRating(Long spotId, Long userId, SpotRatingDTO ratingDTO);
 
     // ==============================
-    // 6.2 天气评估（TODO）
+    // 6.2 天气 + 今晚观测条件（✅ 已实现）
     // ==============================
 
-    Object getWeather(Double longitude, Double latitude);
+    /**
+     * 获取天气 + 观测适宜度评分
+     * 后端调用高德天气API（web-key不暴露前端）
+     */
+    WeatherVO getWeather(Double longitude, Double latitude);
 
-    Object getTonightCondition(Double longitude, Double latitude);
+    /**
+     * 今晚综合观测评估
+     * 综合评分 = 天气适宜度×0.6 + 月相评分×0.4
+     */
+    TonightVO getTonightCondition(Double longitude, Double latitude);
 
     // ==============================
     // 6.3 签到（TODO）

@@ -5,6 +5,8 @@ import com.astronomy.mall.module.location.dto.SpotRatingDTO;
 import com.astronomy.mall.module.location.service.LocationService;
 import com.astronomy.mall.module.location.vo.ObservationSpotVO;
 import com.astronomy.mall.module.location.vo.SpotDetailVO;
+import com.astronomy.mall.module.location.vo.WeatherVO;
+import com.astronomy.mall.module.location.vo.TonightVO;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import io.swagger.annotations.ApiParam;
@@ -27,9 +29,9 @@ import java.util.Map;
  *   GET  /spot/{id}       - 观测点详情（公开，无需登录）
  *   POST /spot/{id}/rating - 评分（需登录）
  *
- * TODO 6.2 (2个):
- *   GET  /weather         - 天气+适宜度
- *   GET  /tonight         - 今晚综合评估
+ * ✅ 6.2 已实现 (2个):
+ *   GET  /weather         - 天气+适宜度（调用高德天气API）
+ *   GET  /tonight         - 今晚综合评估（天气×0.6 + 月相×0.4）
  *
  * TODO 6.3 (2个):
  *   POST /checkin         - 签到
@@ -124,25 +126,29 @@ public class LocationController {
     }
 
     // ================================================================
-    // TODO 6.2: 天气接口（占位，返回提示信息）
+    // ④ GET /location/weather - 天气+观测适宜度（6.2 ✅）
     // ================================================================
 
     @GetMapping("/weather")
-    @ApiOperation("TODO 6.2: 天气+观测适宜度（待开发）")
-    public Result<Object> getWeather(
-            @RequestParam(required = false) Double longitude,
-            @RequestParam(required = false) Double latitude) {
-        // TODO 6.2 实现：调用高德天气 API（web-key 后端持有，不暴露前端）
-        return Result.error("天气功能将在 6.2 节实现");
+    @ApiOperation("获取实况天气 + 观测适宜度评分（高德天气API，公开）")
+    public Result<WeatherVO> getWeather(
+            @ApiParam("经度") @RequestParam Double longitude,
+            @ApiParam("纬度") @RequestParam Double latitude) {
+        WeatherVO weather = locationService.getWeather(longitude, latitude);
+        return Result.success(weather);
     }
 
+    // ================================================================
+    // ⑤ GET /location/tonight - 今晚综合观测评估（6.2 ✅）
+    // ================================================================
+
     @GetMapping("/tonight")
-    @ApiOperation("TODO 6.2: 今晚综合观测评估（待开发）")
-    public Result<Object> getTonightCondition(
-            @RequestParam(required = false) Double longitude,
-            @RequestParam(required = false) Double latitude) {
-        // TODO 6.2 实现：天气×0.6 + 月相×0.4 综合评分
-        return Result.error("今晚评估功能将在 6.2 节实现");
+    @ApiOperation("今晚综合观测评估（天气×0.6 + 月相×0.4，公开）")
+    public Result<TonightVO> getTonightCondition(
+            @ApiParam("经度") @RequestParam Double longitude,
+            @ApiParam("纬度") @RequestParam Double latitude) {
+        TonightVO tonight = locationService.getTonightCondition(longitude, latitude);
+        return Result.success(tonight);
     }
 
     // ================================================================
