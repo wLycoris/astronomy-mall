@@ -27,10 +27,10 @@ import java.util.Map;
  *
  * 📌 接口规划（19个，分阶段实现）:
  *
- * ⬜ 7.2 帖子发布/编辑/删除 (3个):
- *   POST   /publish           - 发布帖子
- *   PUT    /{id}              - 编辑帖子
- *   DELETE /{id}              - 删除帖子
+ * ✅ 7.2 帖子发布/编辑/删除 (3个):
+ *   POST   /publish           - 发布帖子（auto-approve判断状态）
+ *   PUT    /{id}              - 编辑帖子（仅草稿/已拒绝可编辑）
+ *   DELETE /{id}              - 删除帖子（@TableLogic逻辑删除）
  *
  * ⬜ 7.3 帖子列表+详情 (2个):
  *   GET    /list              - 帖子列表（tab: all/follow/hot）
