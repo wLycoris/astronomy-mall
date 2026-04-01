@@ -21,7 +21,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
-import java.util.Map;
+import java.util.*;
 
 /**
  * 帖子服务实现类
@@ -191,14 +191,187 @@ public class PostServiceImpl implements PostService {
 
     @Override
     public Map<String, Object> listPosts(String tab, String tag, Integer pageNum, Integer pageSize, Long currentUserId) {
-        // TODO 7.3 实现
-        throw new BusinessException("帖子列表功能待实现");
+        // 1. 参数校验
+        if (pageNum == null || pageNum < 1) pageNum = 1;
+        if (pageSize == null || pageSize < 1) pageSize = 20;
+        if (pageSize > 50) pageSize = 50; // 防止过大请求
+        int offset = (pageNum - 1) * pageSize;
+
+        // 2. follow模式需要登录
+        if ("follow".equals(tab) && currentUserId == null) {
+            tab = "all"; // 未登录时降级为all
+        }
+
+        // 3. 查询帖子列表（XML SQL: JOIN tb_user + tab分流排序）
+        List<Map<String, Object>> rows = postMapper.selectPostList(tab, tag, currentUserId, offset, pageSize);
+        long total = postMapper.countPostList(tab, tag, currentUserId);
+
+        // 4. 转换为PostVO列表（解析images/tags JSON，提取coverImage）
+        List<PostVO> list = new ArrayList<>();
+        for (Map<String, Object> row : rows) {
+            PostVO vo = convertRowToPostVO(row);
+            // 列表不返回content（节省带宽）
+            vo.setContent(null);
+            // 列表模式不查互动状态（性能优先）
+            vo.setIsLiked(false);
+            vo.setIsCollected(false);
+            vo.setIsFollowed(false);
+            list.add(vo);
+        }
+
+        // 5. 组装分页结果
+        Map<String, Object> result = new HashMap<>();
+        result.put("list", list);
+        result.put("total", total);
+        result.put("pageNum", pageNum);
+        result.put("pageSize", pageSize);
+        return result;
     }
 
     @Override
     public PostVO getPostDetail(Long postId, Long currentUserId) {
-        // TODO 7.3 实现
-        throw new BusinessException("帖子详情功能待实现");
+        // 1. 查询帖子详情（XML SQL: JOIN tb_user）
+        Map<String, Object> row = postMapper.selectPostDetail(postId);
+        if (row == null || row.isEmpty()) {
+            throw new BusinessException("帖子不存在");
+        }
+
+        // 2. 转换为PostVO
+        PostVO vo = convertRowToPostVO(row);
+
+        // 3. 查询当前用户的互动状态（isLiked/isCollected/isFollowed）
+        if (currentUserId != null) {
+            // 是否已点赞
+            Long likeCount = postLikeMapper.selectCount(
+                    new LambdaQueryWrapper<PostLike>()
+                            .eq(PostLike::getPostId, postId)
+                            .eq(PostLike::getUserId, currentUserId));
+            vo.setIsLiked(likeCount != null && likeCount > 0);
+
+            // 是否已收藏
+            Long collectCount = postCollectMapper.selectCount(
+                    new LambdaQueryWrapper<PostCollect>()
+                            .eq(PostCollect::getPostId, postId)
+                            .eq(PostCollect::getUserId, currentUserId));
+            vo.setIsCollected(collectCount != null && collectCount > 0);
+
+            // 是否已关注作者
+            Long postUserId = vo.getUserId();
+            if (postUserId != null && !postUserId.equals(currentUserId)) {
+                Long followCount = userFollowMapper.selectCount(
+                        new LambdaQueryWrapper<com.astronomy.mall.module.forum.entity.UserFollow>()
+                                .eq(com.astronomy.mall.module.forum.entity.UserFollow::getFollowerId, currentUserId)
+                                .eq(com.astronomy.mall.module.forum.entity.UserFollow::getFollowedId, postUserId));
+                vo.setIsFollowed(followCount != null && followCount > 0);
+            } else {
+                vo.setIsFollowed(false);
+            }
+        } else {
+            vo.setIsLiked(false);
+            vo.setIsCollected(false);
+            vo.setIsFollowed(false);
+        }
+
+        // 4. 浏览量+1（异步增量，不影响主流程）
+        try {
+            Post update = new Post();
+            update.setId(postId);
+            update.setViewCount(vo.getViewCount() != null ? vo.getViewCount() + 1 : 1);
+            postMapper.updateById(update);
+        } catch (Exception e) {
+            log.warn("浏览量更新失败, postId={}", postId, e);
+        }
+
+        return vo;
+    }
+
+    /**
+     * 将数据库Map行转换为PostVO
+     * 解析 images/tags JSON字符串为List，提取coverImage
+     */
+    private PostVO convertRowToPostVO(Map<String, Object> row) {
+        PostVO vo = new PostVO();
+        vo.setId(toLong(row.get("id")));
+        vo.setUserId(toLong(row.get("userId")));
+        vo.setTitle((String) row.get("title"));
+        vo.setContent((String) row.get("content"));
+        vo.setStatus(toInt(row.get("status")));
+        vo.setRejectReason((String) row.get("rejectReason"));
+        vo.setLikeCount(toInt(row.get("likeCount")));
+        vo.setCommentCount(toInt(row.get("commentCount")));
+        vo.setCollectCount(toInt(row.get("collectCount")));
+        vo.setViewCount(toInt(row.get("viewCount")));
+        vo.setIsTop(toInt(row.get("isTop")));
+        vo.setIsHot(toInt(row.get("isHot")));
+        vo.setRecognitionId(toLong(row.get("recognitionId")));
+        vo.setAuthorNickname((String) row.get("authorNickname"));
+        vo.setAuthorAvatar((String) row.get("authorAvatar"));
+
+        // hotScore
+        Object hotScoreObj = row.get("hotScore");
+        if (hotScoreObj instanceof Number) {
+            vo.setHotScore(((Number) hotScoreObj).doubleValue());
+        }
+
+        // authorObservationLevel
+        Object levelObj = row.get("authorObservationLevel");
+        if (levelObj instanceof Number) {
+            vo.setAuthorObservationLevel(((Number) levelObj).intValue());
+        }
+
+        // createTime
+        Object timeObj = row.get("createTime");
+        if (timeObj instanceof java.time.LocalDateTime) {
+            vo.setCreateTime((java.time.LocalDateTime) timeObj);
+        }
+
+        // 解析 images JSON数组 → List<String>
+        String imagesStr = (String) row.get("images");
+        if (StringUtils.hasText(imagesStr)) {
+            try {
+                List<String> imageList = JSON.parseArray(imagesStr, String.class);
+                vo.setImages(imageList);
+                // 封面图 = 第一张
+                if (!imageList.isEmpty()) {
+                    vo.setCoverImage(imageList.get(0));
+                }
+            } catch (Exception e) {
+                log.warn("帖子图片JSON解析失败, postId={}", vo.getId());
+                vo.setImages(Collections.emptyList());
+            }
+        } else {
+            vo.setImages(Collections.emptyList());
+        }
+
+        // 解析 tags JSON数组 → List<String>
+        String tagsStr = (String) row.get("tags");
+        if (StringUtils.hasText(tagsStr)) {
+            try {
+                vo.setTags(JSON.parseArray(tagsStr, String.class));
+            } catch (Exception e) {
+                log.warn("帖子标签JSON解析失败, postId={}", vo.getId());
+                vo.setTags(Collections.emptyList());
+            }
+        } else {
+            vo.setTags(Collections.emptyList());
+        }
+
+        return vo;
+    }
+
+    /** 安全转Long */
+    private Long toLong(Object obj) {
+        if (obj == null) return null;
+        if (obj instanceof Long) return (Long) obj;
+        if (obj instanceof Number) return ((Number) obj).longValue();
+        return null;
+    }
+
+    /** 安全转int（默认0） */
+    private int toInt(Object obj) {
+        if (obj == null) return 0;
+        if (obj instanceof Number) return ((Number) obj).intValue();
+        return 0;
     }
 
     // ==============================

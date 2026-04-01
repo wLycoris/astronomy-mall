@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.astronomy.mall.module.forum.mapper.PostMapper">
+
+    <!--
+        PostMapper.xml
+        文件位置: src/main/resources/mapper/PostMapper.xml
+
+        📌 7.3 帖子列表 + 详情 SQL
+        ⚠️ 列名对照（实体字段 → 数据库列名）:
+          userId      → user_id
+          likeCount   → like_count
+          commentCount → comment_count
+          collectCount → collect_count
+          viewCount   → view_count
+          isTop       → is_top
+          hotScore    → hot_score
+          isHot       → is_hot
+          recognitionId → recognition_id
+          createTime  → create_time
+          rejectReason → reject_reason
+    -->
+
+    <!-- ============================================================
+         selectPostList - 帖子列表（瀑布流分页）
+         参数: tab(all/follow/hot), tag(标签筛选), currentUserId, offset, pageSize
+         JOIN tb_user 获取作者昵称和头像
+         ============================================================ -->
+    <select id="selectPostList" resultType="map">
+        SELECT
+            p.id,
+            p.user_id       AS userId,
+            p.title,
+            p.images,
+            p.tags,
+            p.like_count    AS likeCount,
+            p.comment_count AS commentCount,
+            p.collect_count AS collectCount,
+            p.view_count    AS viewCount,
+            p.is_top        AS isTop,
+            p.hot_score     AS hotScore,
+            p.is_hot        AS isHot,
+            p.create_time   AS createTime,
+            u.nickname      AS authorNickname,
+            u.avatar        AS authorAvatar
+        FROM tb_post p
+        LEFT JOIN tb_user u ON p.user_id = u.id
+        <where>
+            p.deleted = 0
+            AND p.status = 2
+            <!-- follow模式: 仅显示当前用户关注的人的帖子 -->
+            <if test="tab == 'follow' and currentUserId != null">
+                AND p.user_id IN (
+                    SELECT followed_id FROM tb_user_follow WHERE follower_id = #{currentUserId}
+                )
+            </if>
+            <!-- 标签筛选: tags JSON数组中包含指定标签 -->
+            <if test="tag != null and tag != ''">
+                AND p.tags LIKE CONCAT('%"', #{tag}, '"%')
+            </if>
+        </where>
+        <choose>
+            <!-- hot模式: 置顶优先，然后按热度分倒序 -->
+            <when test="tab == 'hot'">
+                ORDER BY p.is_top DESC, p.hot_score DESC, p.create_time DESC
+            </when>
+            <!-- all/follow模式: 置顶优先，然后按时间倒序 -->
+            <otherwise>
+                ORDER BY p.is_top DESC, p.create_time DESC
+            </otherwise>
+        </choose>
+        LIMIT #{offset}, #{pageSize}
+    </select>
+
+    <!-- ============================================================
+         countPostList - 帖子列表总数（配合分页）
+         ============================================================ -->
+    <select id="countPostList" resultType="long">
+        SELECT COUNT(*)
+        FROM tb_post p
+        <where>
+            p.deleted = 0
+            AND p.status = 2
+            <if test="tab == 'follow' and currentUserId != null">
+                AND p.user_id IN (
+                    SELECT followed_id FROM tb_user_follow WHERE follower_id = #{currentUserId}
+                )
+            </if>
+            <if test="tag != null and tag != ''">
+                AND p.tags LIKE CONCAT('%"', #{tag}, '"%')
+            </if>
+        </where>
+    </select>
+
+    <!-- ============================================================
+         selectPostDetail - 帖子详情（含作者信息）
+         不含 isLiked/isCollected/isFollowed，由Service层单独查询
+         ============================================================ -->
+    <select id="selectPostDetail" resultType="map">
+        SELECT
+            p.id,
+            p.user_id           AS userId,
+            p.title,
+            p.content,
+            p.images,
+            p.tags,
+            p.status,
+            p.reject_reason     AS rejectReason,
+            p.like_count        AS likeCount,
+            p.comment_count     AS commentCount,
+            p.collect_count     AS collectCount,
+            p.view_count        AS viewCount,
+            p.is_top            AS isTop,
+            p.hot_score         AS hotScore,
+            p.is_hot            AS isHot,
+            p.recognition_id   AS recognitionId,
+            p.create_time       AS createTime,
+            u.nickname          AS authorNickname,
+            u.avatar            AS authorAvatar,
+            u.observation_level AS authorObservationLevel
+        FROM tb_post p
+        LEFT JOIN tb_user u ON p.user_id = u.id
+        WHERE p.id = #{postId}
+          AND p.deleted = 0
+    </select>
+
+</mapper>

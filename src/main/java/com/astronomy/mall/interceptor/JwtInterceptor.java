@@ -73,7 +73,10 @@ public class JwtInterceptor implements HandlerInterceptor {
             "/api/course/list",
             "/api/course/chapter/",
             "/api/course/",          // 匹配 /api/course/{id} 详情
-            "/api/location/spot/"    // 6.3: 观测点详情可选认证，登录后可获取myScore和签到状态
+            "/api/location/spot/",   // 6.3: 观测点详情可选认证，登录后可获取myScore和签到状态
+            "/api/post/list",        // 7.3: 帖子列表可选认证，游客可浏览，登录后follow模式生效
+            "/api/post/search",      // 7.6: 帖子搜索可选认证
+            "/api/post/search/hot"   // 7.6: 热搜词公开
     );
 
     @Override
@@ -160,10 +163,21 @@ public class JwtInterceptor implements HandlerInterceptor {
 
     /**
      * 判断请求路径是否在可选认证列表中
+     *
+     * 📌 7.3: /api/post/{id} 详情接口也需要可选认证（游客可看，登录后有互动状态）
+     *   但不能用 startsWith("/api/post/") 否则会把 /api/post/publish 等也变成可选
+     *   所以单独判断: /api/post/ 后面是纯数字的路径视为帖子详情
      */
     private boolean isOptionalAuth(String requestURI) {
         for (String pattern : OPTIONAL_AUTH_LIST) {
             if (requestURI.startsWith(pattern)) {
+                return true;
+            }
+        }
+        // 7.3: /api/post/{id} 帖子详情 — 仅匹配纯数字ID路径
+        if (requestURI.startsWith("/api/post/")) {
+            String suffix = requestURI.substring("/api/post/".length());
+            if (suffix.matches("\\d+")) {
                 return true;
             }
         }

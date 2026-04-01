@@ -32,9 +32,9 @@ import java.util.Map;
  *   PUT    /{id}              - 编辑帖子（仅草稿/已拒绝可编辑）
  *   DELETE /{id}              - 删除帖子（@TableLogic逻辑删除）
  *
- * ⬜ 7.3 帖子列表+详情 (2个):
- *   GET    /list              - 帖子列表（tab: all/follow/hot）
- *   GET    /{id}              - 帖子详情
+ * ✅ 7.3 帖子列表+详情 (2个):
+ *   GET    /list              - 帖子列表（tab分流+分页，可选认证）
+ *   GET    /{id}              - 帖子详情（含互动状态+浏览量+1，可选认证）
  *
  * ⬜ 7.4 评论+互动 (5个):
  *   POST   /comment           - 发布评论/回复
