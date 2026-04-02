@@ -381,15 +381,87 @@ public class PostServiceImpl implements PostService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public boolean likePost(Long userId, Long postId) {
-        // TODO 7.4 实现
-        throw new BusinessException("帖子点赞功能待实现");
+        // 1. 校验帖子存在
+        Post post = postMapper.selectById(postId);
+        if (post == null) {
+            throw new BusinessException("帖子不存在");
+        }
+
+        // 2. 查询是否已点赞（uk_post_user 唯一约束）
+        Long count = postLikeMapper.selectCount(
+                new LambdaQueryWrapper<PostLike>()
+                        .eq(PostLike::getPostId, postId)
+                        .eq(PostLike::getUserId, userId));
+
+        if (count != null && count > 0) {
+            // 3a. 已点赞 → 取消点赞（删除记录 + like_count -1）
+            postLikeMapper.delete(
+                    new LambdaQueryWrapper<PostLike>()
+                            .eq(PostLike::getPostId, postId)
+                            .eq(PostLike::getUserId, userId));
+            // 更新帖子点赞计数（防止负数）
+            Post update = new Post();
+            update.setId(postId);
+            update.setLikeCount(Math.max(0, post.getLikeCount() - 1));
+            postMapper.updateById(update);
+            log.info("取消帖子点赞: userId={}, postId={}", userId, postId);
+            return false; // 返回false表示当前未点赞
+        } else {
+            // 3b. 未点赞 → 点赞（插入记录 + like_count +1）
+            PostLike like = new PostLike();
+            like.setPostId(postId);
+            like.setUserId(userId);
+            postLikeMapper.insert(like);
+            // 更新帖子点赞计数
+            Post update = new Post();
+            update.setId(postId);
+            update.setLikeCount(post.getLikeCount() + 1);
+            postMapper.updateById(update);
+            log.info("帖子点赞成功: userId={}, postId={}", userId, postId);
+            return true; // 返回true表示当前已点赞
+        }
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public boolean collectPost(Long userId, Long postId) {
-        // TODO 7.4 实现
-        throw new BusinessException("帖子收藏功能待实现");
+        // 1. 校验帖子存在
+        Post post = postMapper.selectById(postId);
+        if (post == null) {
+            throw new BusinessException("帖子不存在");
+        }
+
+        // 2. 查询是否已收藏（uk_post_user 唯一约束）
+        Long count = postCollectMapper.selectCount(
+                new LambdaQueryWrapper<PostCollect>()
+                        .eq(PostCollect::getPostId, postId)
+                        .eq(PostCollect::getUserId, userId));
+
+        if (count != null && count > 0) {
+            // 3a. 已收藏 → 取消收藏（删除记录 + collect_count -1）
+            postCollectMapper.delete(
+                    new LambdaQueryWrapper<PostCollect>()
+                            .eq(PostCollect::getPostId, postId)
+                            .eq(PostCollect::getUserId, userId));
+            Post update = new Post();
+            update.setId(postId);
+            update.setCollectCount(Math.max(0, post.getCollectCount() - 1));
+            postMapper.updateById(update);
+            log.info("取消帖子收藏: userId={}, postId={}", userId, postId);
+            return false; // 返回false表示当前未收藏
+        } else {
+            // 3b. 未收藏 → 收藏（插入记录 + collect_count +1）
+            PostCollect collect = new PostCollect();
+            collect.setPostId(postId);
+            collect.setUserId(userId);
+            postCollectMapper.insert(collect);
+            Post update = new Post();
+            update.setId(postId);
+            update.setCollectCount(post.getCollectCount() + 1);
+            postMapper.updateById(update);
+            log.info("帖子收藏成功: userId={}, postId={}", userId, postId);
+            return true; // 返回true表示当前已收藏
+        }
     }
 
     // ==============================

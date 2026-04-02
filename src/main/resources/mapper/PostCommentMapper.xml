@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.astronomy.mall.module.forum.mapper.PostCommentMapper">
+
+    <!--
+        PostCommentMapper.xml
+        文件位置: src/main/resources/mapper/PostCommentMapper.xml
+
+        📌 7.4 评论列表 SQL（两级结构）
+        ⚠️ 列名对照（实体字段 → 数据库列名）:
+          postId          → post_id
+          userId          → user_id
+          parentId        → parent_id
+          replyToUserId   → reply_to_user_id
+          replyToUsername  → reply_to_username
+          likeCount       → like_count
+          createTime      → create_time
+
+        application.yml 中 mapper-locations: classpath:mapper/**/*.xml 可自动扫描到
+    -->
+
+    <!-- ============================================================
+         selectTopComments - 查询帖子的顶级评论（分页）
+         parent_id = 0 表示顶级评论
+         JOIN tb_user 获取用户昵称和头像
+         子查询获取 replyCount（该顶级评论下的回复数量）
+         按 create_time 降序（新评论在前）
+         ============================================================ -->
+    <select id="selectTopComments" resultType="map">
+        SELECT
+            c.id,
+            c.post_id           AS postId,
+            c.user_id           AS userId,
+            c.parent_id         AS parentId,
+            c.reply_to_user_id  AS replyToUserId,
+            c.reply_to_username AS replyToUsername,
+            c.content,
+            c.like_count        AS likeCount,
+            c.create_time       AS createTime,
+            u.nickname,
+            u.avatar,
+            (SELECT COUNT(*) FROM tb_post_comment r
+             WHERE r.parent_id = c.id AND r.deleted = 0 AND r.status = 1
+            ) AS replyCount
+        FROM tb_post_comment c
+        LEFT JOIN tb_user u ON c.user_id = u.id
+        WHERE c.post_id = #{postId}
+          AND c.parent_id = 0
+          AND c.deleted = 0
+          AND c.status = 1
+        ORDER BY c.create_time DESC
+        LIMIT #{offset}, #{pageSize}
+    </select>
+
+    <!-- ============================================================
+         countTopComments - 顶级评论总数（配合分页）
+         ============================================================ -->
+    <select id="countTopComments" resultType="long">
+        SELECT COUNT(*)
+        FROM tb_post_comment
+        WHERE post_id = #{postId}
+          AND parent_id = 0
+          AND deleted = 0
+          AND status = 1
+    </select>
+
+    <!-- ============================================================
+         selectChildComments - 查询某顶级评论下的所有子回复
+         parent_id = 顶级评论ID
+         JOIN tb_user 获取回复者昵称和头像
+         按 create_time 升序（按时间顺序展示回复）
+         ============================================================ -->
+    <select id="selectChildComments" resultType="map">
+        SELECT
+            c.id,
+            c.post_id           AS postId,
+            c.user_id           AS userId,
+            c.parent_id         AS parentId,
+            c.reply_to_user_id  AS replyToUserId,
+            c.reply_to_username AS replyToUsername,
+            c.content,
+            c.like_count        AS likeCount,
+            c.create_time       AS createTime,
+            u.nickname,
+            u.avatar
+        FROM tb_post_comment c
+        LEFT JOIN tb_user u ON c.user_id = u.id
+        WHERE c.parent_id = #{parentId}
+          AND c.deleted = 0
+          AND c.status = 1
+        ORDER BY c.create_time ASC
+    </select>
+
+</mapper>

@@ -75,6 +75,7 @@ public class JwtInterceptor implements HandlerInterceptor {
             "/api/course/",          // 匹配 /api/course/{id} 详情
             "/api/location/spot/",   // 6.3: 观测点详情可选认证，登录后可获取myScore和签到状态
             "/api/post/list",        // 7.3: 帖子列表可选认证，游客可浏览，登录后follow模式生效
+            "/api/post/comment/list", // 7.4: 评论列表公开，游客可查看评论
             "/api/post/search",      // 7.6: 帖子搜索可选认证
             "/api/post/search/hot"   // 7.6: 热搜词公开
     );

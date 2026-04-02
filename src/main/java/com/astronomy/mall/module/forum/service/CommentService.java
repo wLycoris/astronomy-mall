@@ -37,20 +37,22 @@ public interface CommentService {
     void deleteComment(Long userId, Long commentId);
 
     /**
-     * 评论点赞（幂等，暂用简单实现：直接+1/-1）
+     * 评论点赞（幂等切换，与帖子点赞同逻辑）
      *
      * @param userId    当前用户ID
      * @param commentId 评论ID
+     * @return true=已点赞, false=已取消
      */
-    void likeComment(Long userId, Long commentId);
+    boolean likeComment(Long userId, Long commentId);
 
     /**
      * 获取帖子的评论列表（两级结构）
      *
-     * @param postId   帖子ID
-     * @param pageNum  页码
-     * @param pageSize 每页条数（针对顶级评论分页）
+     * @param postId        帖子ID
+     * @param pageNum       页码
+     * @param pageSize      每页条数（针对顶级评论分页）
+     * @param currentUserId 当前登录用户ID（可为null，用于判断isLiked/isAuthor）
      * @return 两级评论列表
      */
-    Map<String, Object> getCommentsByPostId(Long postId, Integer pageNum, Integer pageSize);
+    Map<String, Object> getCommentsByPostId(Long postId, Integer pageNum, Integer pageSize, Long currentUserId);
 }

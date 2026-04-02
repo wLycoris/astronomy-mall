@@ -51,6 +51,15 @@ public class PostCommentVO {
     /** 评论点赞数 */
     private Integer likeCount;
 
+    /** 当前用户是否已点赞该评论 */
+    private Boolean isLiked;
+
+    /** 回复数量（仅顶级评论有，用于"展开X条回复"显示） */
+    private Integer replyCount;
+
+    /** 是否是帖子作者（前端显示"作者"标识） */
+    private Boolean isAuthor;
+
     /** 发布时间 */
     private LocalDateTime createTime;
 

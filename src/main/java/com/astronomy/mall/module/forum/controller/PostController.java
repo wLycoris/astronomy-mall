@@ -174,15 +174,27 @@ public class PostController {
     }
 
     @PostMapping("/comment/like/{id}")
-    @ApiOperation("评论点赞")
-    public Result<Void> likeComment(@PathVariable Long id,
-                                    HttpServletRequest request) {
+    @ApiOperation("评论点赞/取消点赞")
+    public Result<Boolean> likeComment(@PathVariable Long id,
+                                       HttpServletRequest request) {
         Long userId = (Long) request.getAttribute("userId");
         if (userId == null) {
             return Result.error("请先登录");
         }
-        commentService.likeComment(userId, id);
-        return Result.success();
+        boolean liked = commentService.likeComment(userId, id);
+        return Result.success(liked);
+    }
+
+    @GetMapping("/comment/list")
+    @ApiOperation("评论列表（两级结构，顶级评论分页，可选认证）")
+    public Result<Map<String, Object>> getCommentList(
+            @ApiParam("帖子ID") @RequestParam Long postId,
+            @RequestParam(defaultValue = "1") Integer pageNum,
+            @RequestParam(defaultValue = "20") Integer pageSize,
+            HttpServletRequest request) {
+        Long userId = (Long) request.getAttribute("userId");
+        Map<String, Object> result = commentService.getCommentsByPostId(postId, pageNum, pageSize, userId);
+        return Result.success(result);
     }
 
     @PostMapping("/like/{id}")
