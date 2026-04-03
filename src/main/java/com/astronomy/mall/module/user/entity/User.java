@@ -78,4 +78,10 @@ public class User implements Serializable {
     private LocalDateTime lastLoginTime;
 
     private BigDecimal balance;
+
+    /** 收藏列表是否公开(0-私密 1-公开)，默认0 */
+    private Integer collectVisible;
+
+    /** 点赞列表是否公开(0-私密 1-公开)，默认0 */
+    private Integer likeVisible;
 }

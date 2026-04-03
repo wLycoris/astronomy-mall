@@ -53,4 +53,33 @@ public interface PostMapper extends BaseMapper<Post> {
      * @return 帖子详情Map（Service层转PostVO并补充互动状态）
      */
     Map<String, Object> selectPostDetail(@Param("postId") Long postId);
+
+    /**
+     * 7.5: 用户收藏的帖子列表（JOIN tb_post_collect）
+     *
+     * @param userId   用户ID
+     * @param offset   分页偏移量
+     * @param pageSize 每页条数
+     * @return 帖子列表
+     */
+    List<Map<String, Object>> selectCollectedPosts(@Param("userId") Long userId,
+                                                    @Param("offset") int offset,
+                                                    @Param("pageSize") int pageSize);
+
+    /**
+     * 7.5: 用户收藏的帖子总数
+     */
+    long countCollectedPosts(@Param("userId") Long userId);
+
+    /**
+     * 7.5: 用户点赞的帖子列表（JOIN tb_post_like）
+     */
+    List<Map<String, Object>> selectLikedPosts(@Param("userId") Long userId,
+                                                @Param("offset") int offset,
+                                                @Param("pageSize") int pageSize);
+
+    /**
+     * 7.5: 用户点赞的帖子总数
+     */
+    long countLikedPosts(@Param("userId") Long userId);
 }

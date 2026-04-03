@@ -8,6 +8,7 @@ import com.astronomy.mall.module.forum.service.FollowService;
 import com.astronomy.mall.module.forum.service.PostService;
 import com.astronomy.mall.module.forum.service.SearchService;
 import com.astronomy.mall.module.forum.vo.PostVO;
+import com.astronomy.mall.module.user.entity.User;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import io.swagger.annotations.ApiParam;
@@ -43,7 +44,7 @@ import java.util.Map;
  *   POST   /like/{id}         - 帖子点赞/取消
  *   POST   /collect/{id}      - 帖子收藏/取消
  *
- * ⬜ 7.5 关注+主页 (6个):
+ * ✅ 7.5 关注+主页 (6个):
  *   POST   /user/follow/{userId}   - 关注/取消关注
  *   GET    /user/follow/list       - 我关注的人
  *   GET    /user/fans/list         - 关注我的人
@@ -75,6 +76,9 @@ public class PostController {
 
     @Autowired
     private SearchService searchService;
+
+    @Autowired
+    private com.astronomy.mall.module.user.mapper.UserMapper userMapper;
 
     // ==============================
     // 7.2 帖子发布/编辑/删除
@@ -126,13 +130,16 @@ public class PostController {
     @GetMapping("/list")
     @ApiOperation("帖子列表（瀑布流分页）")
     public Result<Map<String, Object>> listPosts(
-            @ApiParam("标签: all/follow/hot") @RequestParam(defaultValue = "all") String tab,
+            @ApiParam("标签: all/follow/hot/user") @RequestParam(defaultValue = "all") String tab,
             @ApiParam("分类标签筛选") @RequestParam(required = false) String tag,
+            @ApiParam("指定用户ID（tab=user时有效）") @RequestParam(required = false) Long userId,
             @RequestParam(defaultValue = "1") Integer pageNum,
             @RequestParam(defaultValue = "20") Integer pageSize,
             HttpServletRequest request) {
-        Long userId = (Long) request.getAttribute("userId");
-        Map<String, Object> result = postService.listPosts(tab, tag, pageNum, pageSize, userId);
+        Long currentUserId = (Long) request.getAttribute("userId");
+        // tab=user时，使用指定的userId查询该用户的帖子；否则使用当前登录用户
+        Long effectiveUserId = "user".equals(tab) && userId != null ? userId : currentUserId;
+        Map<String, Object> result = postService.listPosts(tab, tag, pageNum, pageSize, effectiveUserId);
         return Result.success(result);
     }
 
@@ -277,16 +284,48 @@ public class PostController {
     }
 
     @GetMapping("/my/collect")
-    @ApiOperation("我收藏的帖子")
+    @ApiOperation("收藏的帖子（支持查看他人公开收藏）")
     public Result<Map<String, Object>> getMyCollects(
+            @ApiParam("目标用户ID（不传则查自己）") @RequestParam(required = false) Long targetUserId,
             @RequestParam(defaultValue = "1") Integer pageNum,
             @RequestParam(defaultValue = "20") Integer pageSize,
             HttpServletRequest request) {
-        Long userId = (Long) request.getAttribute("userId");
-        if (userId == null) {
+        Long currentUserId = (Long) request.getAttribute("userId");
+        // 确定要查谁的收藏
+        Long queryUserId = (targetUserId != null) ? targetUserId : currentUserId;
+        if (queryUserId == null) {
             return Result.error("请先登录");
         }
-        return Result.success(postService.getMyCollects(userId, pageNum, pageSize));
+        // 查别人的收藏需要检查可见性
+        if (targetUserId != null && !targetUserId.equals(currentUserId)) {
+            User targetUser = userMapper.selectById(targetUserId);
+            if (targetUser == null || targetUser.getCollectVisible() == null || targetUser.getCollectVisible() != 1) {
+                return Result.error("该用户未公开收藏列表");
+            }
+        }
+        return Result.success(postService.getMyCollects(queryUserId, pageNum, pageSize));
+    }
+
+    @GetMapping("/my/like")
+    @ApiOperation("点赞的帖子（支持查看他人公开点赞）")
+    public Result<Map<String, Object>> getMyLikes(
+            @ApiParam("目标用户ID（不传则查自己）") @RequestParam(required = false) Long targetUserId,
+            @RequestParam(defaultValue = "1") Integer pageNum,
+            @RequestParam(defaultValue = "20") Integer pageSize,
+            HttpServletRequest request) {
+        Long currentUserId = (Long) request.getAttribute("userId");
+        Long queryUserId = (targetUserId != null) ? targetUserId : currentUserId;
+        if (queryUserId == null) {
+            return Result.error("请先登录");
+        }
+        // 查别人的点赞需要检查可见性
+        if (targetUserId != null && !targetUserId.equals(currentUserId)) {
+            User targetUser = userMapper.selectById(targetUserId);
+            if (targetUser == null || targetUser.getLikeVisible() == null || targetUser.getLikeVisible() != 1) {
+                return Result.error("该用户未公开点赞列表");
+            }
+        }
+        return Result.success(postService.getMyLikes(queryUserId, pageNum, pageSize));
     }
 
     @GetMapping("/user/profile/{userId}")
@@ -296,6 +335,33 @@ public class PostController {
             HttpServletRequest request) {
         Long currentUserId = (Long) request.getAttribute("userId");
         return Result.success(postService.getUserProfile(userId, currentUserId));
+    }
+
+    @PostMapping("/user/visibility")
+    @ApiOperation("切换收藏/点赞列表可见性")
+    public Result<Boolean> toggleVisibility(
+            @ApiParam("类型: collect / like") @RequestParam String type,
+            HttpServletRequest request) {
+        Long userId = (Long) request.getAttribute("userId");
+        if (userId == null) {
+            return Result.error("请先登录");
+        }
+        User user = userMapper.selectById(userId);
+        if (user == null) {
+            return Result.error("用户不存在");
+        }
+        boolean newValue;
+        if ("collect".equals(type)) {
+            newValue = !(user.getCollectVisible() != null && user.getCollectVisible() == 1);
+            user.setCollectVisible(newValue ? 1 : 0);
+        } else if ("like".equals(type)) {
+            newValue = !(user.getLikeVisible() != null && user.getLikeVisible() == 1);
+            user.setLikeVisible(newValue ? 1 : 0);
+        } else {
+            return Result.error("类型不合法");
+        }
+        userMapper.updateById(user);
+        return Result.success(newValue); // true=公开 false=私密
     }
 
     // ==============================

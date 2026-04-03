@@ -13,6 +13,10 @@ import com.astronomy.mall.module.forum.mapper.PostMapper;
 import com.astronomy.mall.module.forum.mapper.UserFollowMapper;
 import com.astronomy.mall.module.forum.service.PostService;
 import com.astronomy.mall.module.forum.vo.PostVO;
+import com.astronomy.mall.module.forum.vo.UserProfileVO;
+import com.astronomy.mall.module.forum.entity.UserFollow;
+import com.astronomy.mall.module.user.entity.User;
+import com.astronomy.mall.module.user.mapper.UserMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -51,6 +55,9 @@ public class PostServiceImpl implements PostService {
 
     @Autowired
     private UserFollowMapper userFollowMapper;
+
+    @Autowired
+    private UserMapper userMapper;
 
     /** 帖子自动审核通过开关（true=发布即公开，false=需管理员审核） */
     @Value("${forum.auto-approve:true}")
@@ -470,19 +477,162 @@ public class PostServiceImpl implements PostService {
 
     @Override
     public Map<String, Object> getMyPosts(Long userId, Integer pageNum, Integer pageSize) {
-        // TODO 7.5 实现
-        throw new BusinessException("我的帖子功能待实现");
+        // 1. 参数校验
+        if (pageNum == null || pageNum < 1) pageNum = 1;
+        if (pageSize == null || pageSize < 1) pageSize = 20;
+        if (pageSize > 50) pageSize = 50;
+        int offset = (pageNum - 1) * pageSize;
+
+        // 2. 查询用户发布的帖子（已发布+未删除，按时间倒序）
+        List<Map<String, Object>> rows = postMapper.selectPostList("user", null, userId, offset, pageSize);
+        long total = postMapper.countPostList("user", null, userId);
+
+        // 3. 转换为PostVO列表
+        List<PostVO> list = new ArrayList<>();
+        for (Map<String, Object> row : rows) {
+            PostVO vo = convertRowToPostVO(row);
+            vo.setContent(null); // 列表不返回正文
+            list.add(vo);
+        }
+
+        // 4. 组装分页结果
+        Map<String, Object> result = new HashMap<>();
+        result.put("list", list);
+        result.put("total", total);
+        result.put("pageNum", pageNum);
+        result.put("pageSize", pageSize);
+        return result;
     }
 
     @Override
     public Map<String, Object> getMyCollects(Long userId, Integer pageNum, Integer pageSize) {
-        // TODO 7.5 实现
-        throw new BusinessException("我的收藏功能待实现");
+        // 1. 参数校验
+        if (pageNum == null || pageNum < 1) pageNum = 1;
+        if (pageSize == null || pageSize < 1) pageSize = 20;
+        if (pageSize > 50) pageSize = 50;
+        int offset = (pageNum - 1) * pageSize;
+
+        // 2. 查询用户收藏的帖子（通过tb_post_collect关联查询）
+        List<Map<String, Object>> rows = postMapper.selectCollectedPosts(userId, offset, pageSize);
+        long total = postMapper.countCollectedPosts(userId);
+
+        // 3. 转换为PostVO列表
+        List<PostVO> list = new ArrayList<>();
+        for (Map<String, Object> row : rows) {
+            PostVO vo = convertRowToPostVO(row);
+            vo.setContent(null); // 列表不返回正文
+            list.add(vo);
+        }
+
+        // 4. 组装分页结果
+        Map<String, Object> result = new HashMap<>();
+        result.put("list", list);
+        result.put("total", total);
+        result.put("pageNum", pageNum);
+        result.put("pageSize", pageSize);
+        return result;
+    }
+
+    @Override
+    public Map<String, Object> getMyLikes(Long userId, Integer pageNum, Integer pageSize) {
+        // 1. 参数校验
+        if (pageNum == null || pageNum < 1) pageNum = 1;
+        if (pageSize == null || pageSize < 1) pageSize = 20;
+        if (pageSize > 50) pageSize = 50;
+        int offset = (pageNum - 1) * pageSize;
+
+        // 2. 查询用户点赞的帖子（通过tb_post_like关联查询）
+        List<Map<String, Object>> rows = postMapper.selectLikedPosts(userId, offset, pageSize);
+        long total = postMapper.countLikedPosts(userId);
+
+        // 3. 转换为PostVO列表
+        List<PostVO> list = new ArrayList<>();
+        for (Map<String, Object> row : rows) {
+            PostVO vo = convertRowToPostVO(row);
+            vo.setContent(null); // 列表不返回正文
+            list.add(vo);
+        }
+
+        // 4. 组装分页结果
+        Map<String, Object> result = new HashMap<>();
+        result.put("list", list);
+        result.put("total", total);
+        result.put("pageNum", pageNum);
+        result.put("pageSize", pageSize);
+        return result;
     }
 
     @Override
     public Map<String, Object> getUserProfile(Long targetUserId, Long currentUserId) {
-        // TODO 7.5 实现
-        throw new BusinessException("用户主页功能待实现");
+        // 1. 查询目标用户基本信息
+        User user = userMapper.selectById(targetUserId);
+        if (user == null) {
+            throw new BusinessException("用户不存在");
+        }
+
+        // 2. 组装UserProfileVO
+        UserProfileVO profile = new UserProfileVO();
+        profile.setUserId(user.getId());
+        profile.setNickname(user.getNickname());
+        profile.setAvatar(user.getAvatar());
+        profile.setObservationLevel(user.getObservationLevel());
+        profile.setCity(user.getCity());
+        profile.setCreateTime(user.getCreateTime());
+        profile.setCollectVisible(user.getCollectVisible() != null ? user.getCollectVisible() : 0);
+        profile.setLikeVisible(user.getLikeVisible() != null ? user.getLikeVisible() : 0);
+
+        // 3. 统计帖子数（已发布且未删除）
+        Long postCount = postMapper.selectCount(
+                new LambdaQueryWrapper<Post>()
+                        .eq(Post::getUserId, targetUserId)
+                        .eq(Post::getStatus, 2));
+        profile.setPostCount(postCount != null ? postCount.intValue() : 0);
+
+        // 4. 统计收藏数（该用户收藏了多少帖子）
+        Long collectCount = postCollectMapper.selectCount(
+                new LambdaQueryWrapper<PostCollect>()
+                        .eq(PostCollect::getUserId, targetUserId));
+        profile.setCollectCount(collectCount != null ? collectCount.intValue() : 0);
+
+        // 5. 统计关注数（该用户关注了多少人）
+        Long followCount = userFollowMapper.selectCount(
+                new LambdaQueryWrapper<UserFollow>()
+                        .eq(UserFollow::getFollowerId, targetUserId));
+        profile.setFollowCount(followCount != null ? followCount.intValue() : 0);
+
+        // 6. 统计粉丝数（多少人关注了该用户）
+        Long fansCount = userFollowMapper.selectCount(
+                new LambdaQueryWrapper<UserFollow>()
+                        .eq(UserFollow::getFollowedId, targetUserId));
+        profile.setFansCount(fansCount != null ? fansCount.intValue() : 0);
+
+        // 7. 统计获赞与收藏总数（该用户所有帖子的like_count+collect_count之和）
+        List<Post> userPosts = postMapper.selectList(
+                new LambdaQueryWrapper<Post>()
+                        .eq(Post::getUserId, targetUserId)
+                        .eq(Post::getStatus, 2)
+                        .select(Post::getLikeCount, Post::getCollectCount));
+        int likeAndCollectCount = 0;
+        for (Post p : userPosts) {
+            likeAndCollectCount += (p.getLikeCount() != null ? p.getLikeCount() : 0);
+            likeAndCollectCount += (p.getCollectCount() != null ? p.getCollectCount() : 0);
+        }
+        profile.setLikeAndCollectCount(likeAndCollectCount);
+
+        // 8. 判断当前用户是否已关注该用户
+        if (currentUserId != null && !currentUserId.equals(targetUserId)) {
+            Long isFollowed = userFollowMapper.selectCount(
+                    new LambdaQueryWrapper<UserFollow>()
+                            .eq(UserFollow::getFollowerId, currentUserId)
+                            .eq(UserFollow::getFollowedId, targetUserId));
+            profile.setIsFollowed(isFollowed != null && isFollowed > 0);
+        } else {
+            profile.setIsFollowed(false);
+        }
+
+        // 9. 组装返回结果
+        Map<String, Object> result = new HashMap<>();
+        result.put("profile", profile);
+        return result;
     }
 }

@@ -2,6 +2,8 @@ package com.astronomy.mall.module.notification.helper;
 
 import com.astronomy.mall.module.notification.dto.SendNotificationDTO;
 import com.astronomy.mall.module.notification.service.NotificationService;
+import com.astronomy.mall.module.user.entity.User;
+import com.astronomy.mall.module.user.mapper.UserMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Async;
@@ -34,6 +36,28 @@ public class NotificationHelper {
 
     @Autowired
     private NotificationService notificationService;
+
+    @Autowired
+    private UserMapper userMapper;
+
+    // ==================== 工具方法 ====================
+
+    /**
+     * 获取用户昵称（用于通知模板变量）
+     * 查不到时返回"天文爱好者"兜底
+     */
+    private String getNickname(Long userId) {
+        if (userId == null) return "天文爱好者";
+        try {
+            User user = userMapper.selectById(userId);
+            if (user != null && user.getNickname() != null && !user.getNickname().isEmpty()) {
+                return user.getNickname();
+            }
+        } catch (Exception e) {
+            log.warn("获取用户昵称失败: userId={}", userId);
+        }
+        return "天文爱好者";
+    }
 
     // ==================== 商城模块通知 ====================
 
@@ -465,6 +489,49 @@ public class NotificationHelper {
             log.info("星图识别失败通知已发送: userId={}, recognitionId={}", userId, recognitionId);
         } catch (Exception e) {
             log.error("发送星图识别失败通知失败: userId={}, recognitionId={}", userId, recognitionId, e);
+        }
+    }
+
+    // ==================== 论坛社区模块通知 (7.5新增) ====================
+
+    /**
+     * 发送用户被关注通知
+     *
+     * 📌 触发时机: FollowServiceImpl.follow() 关注成功后调用
+     * 📌 通知模板: FORUM_USER_FOLLOWED (module=forum, type=user_followed)
+     * 📌 模板变量: followerNickname / followerId
+     * 📌 防自通知: Service层已确保 followerId != followedId
+     *
+     * @param followedId 被关注者ID（接收通知的人）
+     * @param followerId 关注者ID（发起关注的人）
+     */
+    @Async
+    public void sendUserFollowedNotification(Long followedId, Long followerId) {
+        // 防自通知
+        if (followedId.equals(followerId)) return;
+
+        try {
+            // 获取关注者昵称
+            String followerNickname = getNickname(followerId);
+
+            Map<String, Object> variables = new HashMap<>();
+            variables.put("followerNickname", followerNickname);
+            variables.put("followerId", followerId.toString());
+
+            SendNotificationDTO dto = SendNotificationDTO.builder()
+                    .userId(followedId)
+                    .module("forum")
+                    .type("user_followed")
+                    .relatedId(followerId)
+                    .relatedType("user")
+                    .priority(0)
+                    .variables(variables)
+                    .build();
+
+            notificationService.sendNotification(dto);
+            log.info("用户关注通知已发送: followedId={}, followerId={}", followedId, followerId);
+        } catch (Exception e) {
+            log.error("发送用户关注通知失败: followedId={}, followerId={}", followedId, followerId, e);
         }
     }
 

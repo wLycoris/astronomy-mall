@@ -109,6 +109,11 @@ public interface PostService {
     Map<String, Object> getMyCollects(Long userId, Integer pageNum, Integer pageSize);
 
     /**
+     * 我点赞的帖子（分页）
+     */
+    Map<String, Object> getMyLikes(Long userId, Integer pageNum, Integer pageSize);
+
+    /**
      * 用户主页信息（帖子数/收藏数/关注数/粉丝数/isFollowed）
      *
      * @param targetUserId  目标用户ID

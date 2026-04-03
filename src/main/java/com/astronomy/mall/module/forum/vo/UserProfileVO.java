@@ -59,6 +59,12 @@ public class UserProfileVO {
     /** 当前登录用户是否已关注此人（未登录为false） */
     private Boolean isFollowed;
 
+    /** 收藏列表是否公开(0-私密 1-公开) */
+    private Integer collectVisible;
+
+    /** 点赞列表是否公开(0-私密 1-公开) */
+    private Integer likeVisible;
+
     /** 注册时间 */
     private LocalDateTime createTime;
 }

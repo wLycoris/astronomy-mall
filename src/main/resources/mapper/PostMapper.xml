@@ -25,7 +25,8 @@
 
     <!-- ============================================================
          selectPostList - 帖子列表（瀑布流分页）
-         参数: tab(all/follow/hot), tag(标签筛选), currentUserId, offset, pageSize
+         参数: tab(all/follow/hot/user), tag(标签筛选), currentUserId, offset, pageSize
+         tab=user时: currentUserId为目标用户ID，查该用户发布的帖子
          JOIN tb_user 获取作者昵称和头像
          ============================================================ -->
     <select id="selectPostList" resultType="map">
@@ -56,6 +57,10 @@
                     SELECT followed_id FROM tb_user_follow WHERE follower_id = #{currentUserId}
                 )
             </if>
+            <!-- user模式: 指定用户发布的帖子（7.5 我的帖子/用户主页） -->
+            <if test="tab == 'user' and currentUserId != null">
+                AND p.user_id = #{currentUserId}
+            </if>
             <!-- 标签筛选: tags JSON数组中包含指定标签 -->
             <if test="tag != null and tag != ''">
                 AND p.tags LIKE CONCAT('%"', #{tag}, '"%')
@@ -66,7 +71,7 @@
             <when test="tab == 'hot'">
                 ORDER BY p.is_top DESC, p.hot_score DESC, p.create_time DESC
             </when>
-            <!-- all/follow模式: 置顶优先，然后按时间倒序 -->
+            <!-- all/follow/user模式: 置顶优先，然后按时间倒序 -->
             <otherwise>
                 ORDER BY p.is_top DESC, p.create_time DESC
             </otherwise>
@@ -88,10 +93,91 @@
                     SELECT followed_id FROM tb_user_follow WHERE follower_id = #{currentUserId}
                 )
             </if>
+            <if test="tab == 'user' and currentUserId != null">
+                AND p.user_id = #{currentUserId}
+            </if>
             <if test="tag != null and tag != ''">
                 AND p.tags LIKE CONCAT('%"', #{tag}, '"%')
             </if>
         </where>
+    </select>
+
+    <!-- ============================================================
+         selectCollectedPosts - 用户收藏的帖子列表（7.5）
+         JOIN tb_post_collect + tb_user，按收藏时间倒序
+         ============================================================ -->
+    <select id="selectCollectedPosts" resultType="map">
+        SELECT
+            p.id,
+            p.user_id       AS userId,
+            p.title,
+            p.images,
+            p.tags,
+            p.like_count    AS likeCount,
+            p.comment_count AS commentCount,
+            p.collect_count AS collectCount,
+            p.view_count    AS viewCount,
+            p.is_top        AS isTop,
+            p.hot_score     AS hotScore,
+            p.is_hot        AS isHot,
+            p.create_time   AS createTime,
+            u.nickname      AS authorNickname,
+            u.avatar        AS authorAvatar
+        FROM tb_post_collect c
+        INNER JOIN tb_post p ON c.post_id = p.id AND p.deleted = 0 AND p.status = 2
+        LEFT JOIN tb_user u ON p.user_id = u.id
+        WHERE c.user_id = #{userId}
+        ORDER BY c.create_time DESC
+        LIMIT #{offset}, #{pageSize}
+    </select>
+
+    <!-- ============================================================
+         countCollectedPosts - 用户收藏的帖子总数（7.5）
+         ============================================================ -->
+    <select id="countCollectedPosts" resultType="long">
+        SELECT COUNT(*)
+        FROM tb_post_collect c
+        INNER JOIN tb_post p ON c.post_id = p.id AND p.deleted = 0 AND p.status = 2
+        WHERE c.user_id = #{userId}
+    </select>
+
+    <!-- ============================================================
+         selectLikedPosts - 用户点赞的帖子列表（7.5）
+         JOIN tb_post_like + tb_user，按点赞时间倒序
+         ============================================================ -->
+    <select id="selectLikedPosts" resultType="map">
+        SELECT
+            p.id,
+            p.user_id       AS userId,
+            p.title,
+            p.images,
+            p.tags,
+            p.like_count    AS likeCount,
+            p.comment_count AS commentCount,
+            p.collect_count AS collectCount,
+            p.view_count    AS viewCount,
+            p.is_top        AS isTop,
+            p.hot_score     AS hotScore,
+            p.is_hot        AS isHot,
+            p.create_time   AS createTime,
+            u.nickname      AS authorNickname,
+            u.avatar        AS authorAvatar
+        FROM tb_post_like l
+        INNER JOIN tb_post p ON l.post_id = p.id AND p.deleted = 0 AND p.status = 2
+        LEFT JOIN tb_user u ON p.user_id = u.id
+        WHERE l.user_id = #{userId}
+        ORDER BY l.create_time DESC
+        LIMIT #{offset}, #{pageSize}
+    </select>
+
+    <!-- ============================================================
+         countLikedPosts - 用户点赞的帖子总数（7.5）
+         ============================================================ -->
+    <select id="countLikedPosts" resultType="long">
+        SELECT COUNT(*)
+        FROM tb_post_like l
+        INNER JOIN tb_post p ON l.post_id = p.id AND p.deleted = 0 AND p.status = 2
+        WHERE l.user_id = #{userId}
     </select>
 
     <!-- ============================================================
