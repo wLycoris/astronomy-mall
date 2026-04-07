@@ -82,4 +82,21 @@ public interface PostMapper extends BaseMapper<Post> {
      * 7.5: 用户点赞的帖子总数
      */
     long countLikedPosts(@Param("userId") Long userId);
+
+    /**
+     * 7.6: 搜索帖子（LIKE匹配title+content, status=2, 按hot_score倒序）
+     */
+    List<Map<String, Object>> searchPosts(@Param("keyword") String keyword,
+                                           @Param("offset") int offset,
+                                           @Param("pageSize") int pageSize);
+
+    /**
+     * 7.6: 搜索帖子总数
+     */
+    long countSearchPosts(@Param("keyword") String keyword);
+
+    /**
+     * 7.6: 查询所有已发布帖子的tags字段（用于话题搜索聚合）
+     */
+    List<Map<String, Object>> selectAllTags();
 }

@@ -181,6 +181,61 @@
     </select>
 
     <!-- ============================================================
+         searchPosts - 搜索帖子（7.6）
+         LIKE匹配 title+content+tags, status=2(已发布), 按hot_score倒序
+         ============================================================ -->
+    <select id="searchPosts" resultType="map">
+        SELECT
+            p.id,
+            p.user_id       AS userId,
+            p.title,
+            p.content,
+            p.images,
+            p.tags,
+            p.like_count    AS likeCount,
+            p.comment_count AS commentCount,
+            p.collect_count AS collectCount,
+            p.view_count    AS viewCount,
+            p.is_top        AS isTop,
+            p.hot_score     AS hotScore,
+            p.is_hot        AS isHot,
+            p.create_time   AS createTime,
+            u.nickname      AS authorNickname,
+            u.avatar        AS authorAvatar
+        FROM tb_post p
+        LEFT JOIN tb_user u ON p.user_id = u.id
+        WHERE p.deleted = 0
+          AND p.status = 2
+          AND (p.title LIKE #{keyword} OR p.content LIKE #{keyword} OR p.tags LIKE #{keyword})
+        ORDER BY p.hot_score DESC, p.create_time DESC
+        LIMIT #{offset}, #{pageSize}
+    </select>
+
+    <!-- ============================================================
+         countSearchPosts - 搜索帖子总数（7.6）
+         ============================================================ -->
+    <select id="countSearchPosts" resultType="long">
+        SELECT COUNT(*)
+        FROM tb_post p
+        WHERE p.deleted = 0
+          AND p.status = 2
+          AND (p.title LIKE #{keyword} OR p.content LIKE #{keyword} OR p.tags LIKE #{keyword})
+    </select>
+
+    <!-- ============================================================
+         selectAllTags - 查询所有已发布帖子的tags字段（7.6话题搜索聚合用）
+         ============================================================ -->
+    <select id="selectAllTags" resultType="map">
+        SELECT p.tags
+        FROM tb_post p
+        WHERE p.deleted = 0
+          AND p.status = 2
+          AND p.tags IS NOT NULL
+          AND p.tags != ''
+          AND p.tags != '[]'
+    </select>
+
+    <!-- ============================================================
          selectPostDetail - 帖子详情（含作者信息）
          不含 isLiked/isCollected/isFollowed，由Service层单独查询
          ============================================================ -->
