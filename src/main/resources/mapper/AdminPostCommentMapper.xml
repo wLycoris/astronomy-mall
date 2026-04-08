@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.astronomy.mall.module.admin.mapper.AdminPostCommentMapper">
+
+    <!--
+        AdminPostCommentMapper.xml
+        文件位置: src/main/resources/mapper/AdminPostCommentMapper.xml
+
+        📌 7.7 后台论坛评论管理 SQL 集合
+        ⚠️ 列名对照（实体字段 → 数据库列名）:
+          postId          → post_id
+          userId          → user_id
+          parentId        → parent_id
+          replyToUserId   → reply_to_user_id
+          replyToUsername → reply_to_username
+          likeCount       → like_count
+          createTime      → create_time
+
+        application.yml 中 mapper-locations: classpath:mapper/**/*.xml 自动扫描
+    -->
+
+    <!-- ============================================================
+         selectAdminCommentList - 后台评论列表
+         管理员视角的评论分页（可按帖子+关键词筛选）
+         JOIN tb_user 拿评论人昵称头像，JOIN tb_post 拿帖子标题
+         不限 status，方便管理员看到被删评论(status=0)
+         按 create_time 倒序（最新评论在前）
+         ============================================================ -->
+    <select id="selectAdminCommentList" resultType="map">
+        SELECT
+            c.id,
+            c.post_id           AS postId,
+            c.user_id           AS userId,
+            c.parent_id         AS parentId,
+            c.reply_to_user_id  AS replyToUserId,
+            c.reply_to_username AS replyToUsername,
+            c.content,
+            c.like_count        AS likeCount,
+            c.status,
+            c.create_time       AS createTime,
+            u.nickname          AS userNickname,
+            u.avatar            AS userAvatar,
+            p.title             AS postTitle
+        FROM tb_post_comment c
+        LEFT JOIN tb_user u ON c.user_id = u.id
+        LEFT JOIN tb_post p ON c.post_id = p.id
+        <where>
+            c.deleted = 0
+            <if test="postId != null">
+                AND c.post_id = #{postId}
+            </if>
+            <if test="keyword != null and keyword != ''">
+                AND c.content LIKE CONCAT('%', #{keyword}, '%')
+            </if>
+        </where>
+        ORDER BY c.create_time DESC
+        LIMIT #{offset}, #{pageSize}
+    </select>
+
+    <!-- ============================================================
+         countAdminCommentList - 配合 selectAdminCommentList 的总数
+         ============================================================ -->
+    <select id="countAdminCommentList" resultType="long">
+        SELECT COUNT(*)
+        FROM tb_post_comment c
+        <where>
+            c.deleted = 0
+            <if test="postId != null">
+                AND c.post_id = #{postId}
+            </if>
+            <if test="keyword != null and keyword != ''">
+                AND c.content LIKE CONCAT('%', #{keyword}, '%')
+            </if>
+        </where>
+    </select>
+
+    <!-- ============================================================
+         countTotalComments - 总评论数（不含已被管理员删除 status=0，不含软删）
+         ============================================================ -->
+    <select id="countTotalComments" resultType="long">
+        SELECT COUNT(*)
+        FROM tb_post_comment
+        WHERE deleted = 0 AND status = 1
+    </select>
+
+    <!-- ============================================================
+         countTodayComments - 今日新增评论数
+         ============================================================ -->
+    <select id="countTodayComments" resultType="long">
+        SELECT COUNT(*)
+        FROM tb_post_comment
+        WHERE deleted = 0
+          AND status = 1
+          AND DATE(create_time) = CURDATE()
+    </select>
+
+    <!-- ============================================================
+         countTodayActiveUsers - 今日活跃用户数（发帖+评论 去重）
+         UNION 合并今天发过帖和今天评论过的 user_id
+         ============================================================ -->
+    <select id="countTodayActiveUsers" resultType="long">
+        SELECT COUNT(*) FROM (
+            SELECT user_id FROM tb_post
+                WHERE deleted = 0 AND status != 4 AND DATE(create_time) = CURDATE()
+            UNION
+            SELECT user_id FROM tb_post_comment
+                WHERE deleted = 0 AND status = 1 AND DATE(create_time) = CURDATE()
+        ) t
+    </select>
+
+    <!-- ============================================================
+         selectDailyCommentCount - 近N天每天的评论数量（折线图用）
+         使用 DATE_FORMAT 返回 String 类型
+         ============================================================ -->
+    <select id="selectDailyCommentCount" resultType="map">
+        SELECT DATE_FORMAT(create_time, '%Y-%m-%d') AS date, COUNT(*) AS count
+        FROM tb_post_comment
+        WHERE deleted = 0
+          AND status = 1
+          AND create_time >= DATE_SUB(CURDATE(), INTERVAL #{days} DAY)
+        GROUP BY DATE_FORMAT(create_time, '%Y-%m-%d')
+        ORDER BY date ASC
+    </select>
+
+</mapper>

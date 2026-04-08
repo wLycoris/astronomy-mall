@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="com.astronomy.mall.module.admin.mapper.AdminPostMapper">
+
+    <!--
+        AdminPostMapper.xml
+        文件位置: src/main/resources/mapper/AdminPostMapper.xml
+
+        📌 7.7 后台论坛帖子管理 SQL 集合
+        ⚠️ 列名对照（实体字段 → 数据库列名）:
+          userId       → user_id
+          likeCount    → like_count
+          commentCount → comment_count
+          collectCount → collect_count
+          viewCount    → view_count
+          isTop        → is_top
+          hotScore     → hot_score
+          isHot        → is_hot
+          createTime   → create_time
+          rejectReason → reject_reason
+
+        application.yml 中 mapper-locations: classpath:mapper/**/*.xml 自动扫描
+    -->
+
+    <!-- ============================================================
+         selectAdminPostList - 后台帖子列表
+         管理员视角的帖子分页列表，可按状态/关键词筛选
+         JOIN tb_user 拿作者昵称，关键词模糊匹配 title/content/nickname
+         默认按 is_top DESC, create_time DESC（置顶优先 + 最新优先）
+         ============================================================ -->
+    <select id="selectAdminPostList" resultType="map">
+        SELECT
+            p.id,
+            p.user_id       AS userId,
+            p.title,
+            p.content,
+            p.images,
+            p.tags,
+            p.status,
+            p.reject_reason AS rejectReason,
+            p.like_count    AS likeCount,
+            p.comment_count AS commentCount,
+            p.collect_count AS collectCount,
+            p.view_count    AS viewCount,
+            p.is_top        AS isTop,
+            p.hot_score     AS hotScore,
+            p.is_hot        AS isHot,
+            p.create_time   AS createTime,
+            u.nickname      AS authorNickname,
+            u.avatar        AS authorAvatar
+        FROM tb_post p
+        LEFT JOIN tb_user u ON p.user_id = u.id
+        <where>
+            p.deleted = 0
+            <!-- 按状态筛选 -->
+            <if test="status != null">
+                AND p.status = #{status}
+            </if>
+            <!-- 关键词模糊匹配标题/内容/作者昵称 -->
+            <if test="keyword != null and keyword != ''">
+                AND (
+                    p.title LIKE CONCAT('%', #{keyword}, '%')
+                    OR p.content LIKE CONCAT('%', #{keyword}, '%')
+                    OR u.nickname LIKE CONCAT('%', #{keyword}, '%')
+                )
+            </if>
+        </where>
+        ORDER BY p.is_top DESC, p.create_time DESC
+        LIMIT #{offset}, #{pageSize}
+    </select>
+
+    <!-- ============================================================
+         countAdminPostList - 配合 selectAdminPostList 的总数
+         ============================================================ -->
+    <select id="countAdminPostList" resultType="long">
+        SELECT COUNT(*)
+        FROM tb_post p
+        LEFT JOIN tb_user u ON p.user_id = u.id
+        <where>
+            p.deleted = 0
+            <if test="status != null">
+                AND p.status = #{status}
+            </if>
+            <if test="keyword != null and keyword != ''">
+                AND (
+                    p.title LIKE CONCAT('%', #{keyword}, '%')
+                    OR p.content LIKE CONCAT('%', #{keyword}, '%')
+                    OR u.nickname LIKE CONCAT('%', #{keyword}, '%')
+                )
+            </if>
+        </where>
+    </select>
+
+    <!-- ============================================================
+         countPendingPosts - 待审核帖子数（status=1）
+         用于侧边栏角标
+         ============================================================ -->
+    <select id="countPendingPosts" resultType="long">
+        SELECT COUNT(*)
+        FROM tb_post
+        WHERE deleted = 0 AND status = 1
+    </select>
+
+    <!-- ============================================================
+         selectStatusDistribution - 各状态帖子数量分布（饼图）
+         返回: [{status:1, count:10}, {status:2, count:120}, ...]
+         不含 deleted=1（软删）的记录
+         ============================================================ -->
+    <select id="selectStatusDistribution" resultType="map">
+        SELECT status, COUNT(*) AS count
+        FROM tb_post
+        WHERE deleted = 0
+        GROUP BY status
+    </select>
+
+    <!-- ============================================================
+         selectDailyPostCount - 近N天每天发帖数（折线图）
+         返回: [{date:"2026-04-01", count:10}, ...]
+         使用 DATE_FORMAT 保证返回 String 类型，前端直接用
+         ============================================================ -->
+    <select id="selectDailyPostCount" resultType="map">
+        SELECT DATE_FORMAT(create_time, '%Y-%m-%d') AS date, COUNT(*) AS count
+        FROM tb_post
+        WHERE deleted = 0
+          AND status != 4
+          AND create_time >= DATE_SUB(CURDATE(), INTERVAL #{days} DAY)
+        GROUP BY DATE_FORMAT(create_time, '%Y-%m-%d')
+        ORDER BY date ASC
+    </select>
+
+    <!-- ============================================================
+         countTotalPosts - 总帖子数（不含管理员删除 status=4）
+         ============================================================ -->
+    <select id="countTotalPosts" resultType="long">
+        SELECT COUNT(*)
+        FROM tb_post
+        WHERE deleted = 0 AND status != 4
+    </select>
+
+    <!-- ============================================================
+         countTotalAuthors - 累计发帖用户数（去重）
+         ============================================================ -->
+    <select id="countTotalAuthors" resultType="long">
+        SELECT COUNT(DISTINCT user_id)
+        FROM tb_post
+        WHERE deleted = 0 AND status != 4
+    </select>
+
+    <!-- ============================================================
+         countTodayPosts - 今日发帖数
+         ============================================================ -->
+    <select id="countTodayPosts" resultType="long">
+        SELECT COUNT(*)
+        FROM tb_post
+        WHERE deleted = 0
+          AND status != 4
+          AND DATE(create_time) = CURDATE()
+    </select>
+
+</mapper>

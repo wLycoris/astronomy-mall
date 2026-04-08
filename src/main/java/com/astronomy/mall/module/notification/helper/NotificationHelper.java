@@ -535,6 +535,95 @@ public class NotificationHelper {
         }
     }
 
+    // ==================== 论坛模块通知 (7.7 后台管理) ====================
+
+    /**
+     * 7.7: 发送帖子审核通过通知
+     *
+     * 📌 触发时机: AdminPostServiceImpl.auditPost(action=approve) 执行后
+     * 📌 通知模板: FORUM_POST_APPROVED  (type=post_approved, module=forum)
+     * 📌 模板变量: postTitle / postId
+     * 📌 跳转路径: /forum/detail/{postId}
+     *
+     * @param userId    帖子作者ID（接收通知）
+     * @param postTitle 帖子标题（截断展示）
+     * @param postId    帖子ID（用于跳转）
+     */
+    @Async
+    public void sendPostApprovedNotification(Long userId, String postTitle, Long postId) {
+        if (userId == null || postId == null) return;
+
+        Map<String, Object> variables = new HashMap<>();
+        variables.put("postTitle", truncate(postTitle, 30));
+        variables.put("postId", postId.toString());
+
+        SendNotificationDTO dto = SendNotificationDTO.builder()
+                .userId(userId)
+                .module("forum")
+                .type("post_approved")
+                .relatedId(postId)
+                .relatedType("post")
+                .priority(1)
+                .variables(variables)
+                .build();
+
+        try {
+            notificationService.sendNotification(dto);
+            log.info("帖子审核通过通知已发送: userId={}, postId={}", userId, postId);
+        } catch (Exception e) {
+            log.error("发送帖子审核通过通知失败: userId={}, postId={}", userId, postId, e);
+        }
+    }
+
+    /**
+     * 7.7: 发送帖子审核拒绝通知
+     *
+     * 📌 触发时机: AdminPostServiceImpl.auditPost(action=reject) 执行后
+     * 📌 通知模板: FORUM_POST_REJECTED  (type=post_rejected, module=forum)
+     * 📌 模板变量: postTitle / reason / postId
+     * 📌 跳转路径: /forum/detail/{postId} （让用户看到拒绝原因后可编辑重发）
+     *
+     * @param userId    帖子作者ID
+     * @param postTitle 帖子标题
+     * @param reason    拒绝原因
+     * @param postId    帖子ID
+     */
+    @Async
+    public void sendPostRejectedNotification(Long userId, String postTitle, String reason, Long postId) {
+        if (userId == null || postId == null) return;
+
+        Map<String, Object> variables = new HashMap<>();
+        variables.put("postTitle", truncate(postTitle, 30));
+        variables.put("reason", reason == null ? "（管理员未填写原因）" : truncate(reason, 100));
+        variables.put("postId", postId.toString());
+
+        SendNotificationDTO dto = SendNotificationDTO.builder()
+                .userId(userId)
+                .module("forum")
+                .type("post_rejected")
+                .relatedId(postId)
+                .relatedType("post")
+                .priority(1)
+                .variables(variables)
+                .build();
+
+        try {
+            notificationService.sendNotification(dto);
+            log.info("帖子审核拒绝通知已发送: userId={}, postId={}", userId, postId);
+        } catch (Exception e) {
+            log.error("发送帖子审核拒绝通知失败: userId={}, postId={}", userId, postId, e);
+        }
+    }
+
+    /**
+     * 字符串截断工具（用于通知标题/原因展示，超长加 ... 后缀）
+     */
+    private String truncate(String s, int maxLen) {
+        if (s == null) return "";
+        if (s.length() <= maxLen) return s;
+        return s.substring(0, maxLen) + "...";
+    }
+
     // ==================== 系统模块通知 ====================
 
     /**

@@ -67,13 +67,19 @@
             </if>
         </where>
         <choose>
-            <!-- hot模式: 置顶优先，然后按热度分倒序 -->
+            <!--
+              ⚠️ 7.7 重新定位说明:
+              原来的 is_top 字段在小红书风格瀑布流中无视觉效果，从用户列表的
+              ORDER BY 中移除。is_top 现在改为"管理员推荐信号"，由 8.x 推荐
+              算法读取作为 hot_score 的额外加权因子，用户端不感知。
+            -->
+            <!-- hot模式: 按热度分倒序（推荐算法已把 is_top 因子融入 hot_score） -->
             <when test="tab == 'hot'">
-                ORDER BY p.is_top DESC, p.hot_score DESC, p.create_time DESC
+                ORDER BY p.hot_score DESC, p.create_time DESC
             </when>
-            <!-- all/follow/user模式: 置顶优先，然后按时间倒序 -->
+            <!-- all/follow/user模式: 纯按时间倒序 -->
             <otherwise>
-                ORDER BY p.is_top DESC, p.create_time DESC
+                ORDER BY p.create_time DESC
             </otherwise>
         </choose>
         LIMIT #{offset}, #{pageSize}
