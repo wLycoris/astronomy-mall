@@ -15,6 +15,7 @@ import com.astronomy.mall.module.forum.service.PostService;
 import com.astronomy.mall.module.forum.vo.PostVO;
 import com.astronomy.mall.module.forum.vo.UserProfileVO;
 import com.astronomy.mall.module.forum.entity.UserFollow;
+import com.astronomy.mall.module.notification.helper.NotificationHelper;
 import com.astronomy.mall.module.user.entity.User;
 import com.astronomy.mall.module.user.mapper.UserMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -58,6 +59,10 @@ public class PostServiceImpl implements PostService {
 
     @Autowired
     private UserMapper userMapper;
+
+    /** 7.8 通知集成: 点赞/收藏触发通知（防自通知由 helper 内部处理） */
+    @Autowired
+    private NotificationHelper notificationHelper;
 
     /** 帖子自动审核通过开关（true=发布即公开，false=需管理员审核） */
     @Value("${forum.auto-approve:true}")
@@ -425,6 +430,11 @@ public class PostServiceImpl implements PostService {
             update.setLikeCount(post.getLikeCount() + 1);
             postMapper.updateById(update);
             log.info("帖子点赞成功: userId={}, postId={}", userId, postId);
+
+            // 7.8: 发送被点赞通知（异步，防自通知由 helper 内部判断）
+            notificationHelper.sendPostLikedNotification(
+                    post.getUserId(), userId, post.getTitle(), postId);
+
             return true; // 返回true表示当前已点赞
         }
     }
@@ -467,6 +477,11 @@ public class PostServiceImpl implements PostService {
             update.setCollectCount(post.getCollectCount() + 1);
             postMapper.updateById(update);
             log.info("帖子收藏成功: userId={}, postId={}", userId, postId);
+
+            // 7.8: 发送被收藏通知（异步，防自通知由 helper 内部判断）
+            notificationHelper.sendPostCollectedNotification(
+                    post.getUserId(), userId, post.getTitle(), postId);
+
             return true; // 返回true表示当前已收藏
         }
     }

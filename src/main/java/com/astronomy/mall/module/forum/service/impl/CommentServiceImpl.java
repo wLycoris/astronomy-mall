@@ -10,6 +10,7 @@ import com.astronomy.mall.module.forum.mapper.PostCommentMapper;
 import com.astronomy.mall.module.forum.mapper.PostMapper;
 import com.astronomy.mall.module.forum.service.CommentService;
 import com.astronomy.mall.module.forum.vo.PostCommentVO;
+import com.astronomy.mall.module.notification.helper.NotificationHelper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -53,6 +54,10 @@ public class CommentServiceImpl implements CommentService {
     @Autowired
     private CommentLikeMapper commentLikeMapper;
 
+    /** 7.8 通知集成: 顶级评论 → 通知帖子作者；子回复 → 通知被回复人 */
+    @Autowired
+    private NotificationHelper notificationHelper;
+
     // ==============================
     // 7.4 发布评论/回复
     // ==============================
@@ -77,8 +82,9 @@ public class CommentServiceImpl implements CommentService {
 
         // 3. 如果是回复（parentId>0），校验父评论存在
         String replyToUsername = null;
+        PostComment parentComment = null; // 7.8: 提升作用域，通知发送时使用
         if (parentId > 0) {
-            PostComment parentComment = postCommentMapper.selectById(parentId);
+            parentComment = postCommentMapper.selectById(parentId);
             if (parentComment == null) {
                 throw new BusinessException("被回复的评论不存在");
             }
@@ -120,8 +126,21 @@ public class CommentServiceImpl implements CommentService {
         update.setCommentCount(post.getCommentCount() + 1);
         postMapper.updateById(update);
 
-        // TODO 7.8: 发送评论通知（防自通知）
-        // if (!userId.equals(post.getUserId())) { notificationHelper.send(...) }
+        // 7.8: 发送评论通知（防自通知由 helper 内部处理）
+        //   - 顶级评论 (parentComment == null)  → 通知帖子作者
+        //   - 回复     (parentComment != null)  → 通知被回复人
+        //     被回复人优先取 dto.replyToUserId（前端指定回复某条子评论作者），
+        //     退化为顶级评论作者（直接点击"回复"父评论的场景）
+        if (parentComment == null) {
+            notificationHelper.sendPostCommentedNotification(
+                    post.getUserId(), userId, post.getTitle(), dto.getContent(), dto.getPostId());
+        } else {
+            Long repliedUserId = dto.getReplyToUserId() != null
+                    ? dto.getReplyToUserId()
+                    : parentComment.getUserId();
+            notificationHelper.sendCommentRepliedNotification(
+                    repliedUserId, userId, dto.getContent(), dto.getPostId());
+        }
 
         return comment.getId();
     }

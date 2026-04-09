@@ -29,6 +29,14 @@ import java.util.Map;
  * 📌 2026-03-20 新增: sendCourseCompletedNotification       (5.1 课程学习完成，单条)
  * 📌 2026-03-23 新增: sendCheckinNotification               (6.0 观测点签到成功)
  * 📌 2026-03-23 新增: sendWeatherSuitableNotification       (6.0 今晚观测条件极佳，默认disabled)
+ * 📌 2026-04-08 新增 (7.8 论坛阶段二，6 个论坛业务通知):
+ *    sendPostLikedNotification        - 帖子被点赞     (防自通知)
+ *    sendPostCommentedNotification    - 帖子被评论     (防自通知)
+ *    sendCommentRepliedNotification   - 评论被回复     (防自通知)
+ *    sendPostCollectedNotification    - 帖子被收藏     (防自通知)
+ *    sendPostTrendingNotification     - 帖子升为热门   (ForumScheduler 触发，仅一次)
+ *    sendMentionedNotification        - 被@提及        (扩展功能，批量)
+ *    📌 sendUserFollowedNotification 已在 7.5 实现，sendPostApproved/Rejected 在 7.7 实现
  */
 @Slf4j
 @Component
@@ -613,6 +621,270 @@ public class NotificationHelper {
         } catch (Exception e) {
             log.error("发送帖子审核拒绝通知失败: userId={}, postId={}", userId, postId, e);
         }
+    }
+
+    // ==================== 论坛模块通知 (7.8 阶段二，6 个) ====================
+
+    /**
+     * 7.8: 帖子被点赞通知
+     *
+     * 📌 触发时机: PostServiceImpl.likePost() 点赞成功后调用（取消点赞不通知）
+     * 📌 通知模板: FORUM_POST_LIKED  (type=post_liked, module=forum)
+     * 📌 模板变量: likerNickname / postTitle / postId
+     * 📌 跳转路径: /forum/list?postId={postId}
+     * 📌 防自通知: 操作者 == 作者时跳过
+     *
+     * @param authorId    帖子作者 ID（接收通知）
+     * @param likerId     点赞者 ID（用于 防自通知 + 取昵称）
+     * @param postTitle   帖子标题（截断展示）
+     * @param postId      帖子 ID
+     */
+    @Async
+    public void sendPostLikedNotification(Long authorId, Long likerId, String postTitle, Long postId) {
+        if (authorId == null || likerId == null || postId == null) return;
+        // 防自通知
+        if (authorId.equals(likerId)) return;
+
+        try {
+            Map<String, Object> variables = new HashMap<>();
+            variables.put("likerNickname", getNickname(likerId));
+            variables.put("postTitle",     truncate(postTitle, 30));
+            variables.put("postId",        postId.toString());
+
+            SendNotificationDTO dto = SendNotificationDTO.builder()
+                    .userId(authorId)
+                    .module("forum")
+                    .type("post_liked")
+                    .relatedId(postId)
+                    .relatedType("post")
+                    .priority(0)
+                    .variables(variables)
+                    .build();
+
+            notificationService.sendNotification(dto);
+            log.info("帖子点赞通知已发送: authorId={}, likerId={}, postId={}", authorId, likerId, postId);
+        } catch (Exception e) {
+            log.error("发送帖子点赞通知失败: postId={}", postId, e);
+        }
+    }
+
+    /**
+     * 7.8: 帖子被评论通知（顶级评论触发）
+     *
+     * 📌 触发时机: CommentServiceImpl.addComment() 顶级评论(parentId==0)写入成功后调用
+     * 📌 通知模板: FORUM_POST_COMMENTED  (type=post_commented, module=forum)
+     * 📌 模板变量: commenterNickname / postTitle / commentSnippet / postId
+     * 📌 跳转路径: /forum/list?postId={postId}
+     * 📌 防自通知: 操作者 == 作者时跳过
+     *
+     * @param authorId         帖子作者 ID（接收通知）
+     * @param commenterId      评论者 ID
+     * @param postTitle        帖子标题
+     * @param commentSnippet   评论内容（前 50 字截断）
+     * @param postId           帖子 ID
+     */
+    @Async
+    public void sendPostCommentedNotification(Long authorId, Long commenterId,
+                                              String postTitle, String commentSnippet, Long postId) {
+        if (authorId == null || commenterId == null || postId == null) return;
+        if (authorId.equals(commenterId)) return;
+
+        try {
+            Map<String, Object> variables = new HashMap<>();
+            variables.put("commenterNickname", getNickname(commenterId));
+            variables.put("postTitle",         truncate(postTitle, 30));
+            variables.put("commentSnippet",    truncate(commentSnippet, 50));
+            variables.put("postId",            postId.toString());
+
+            SendNotificationDTO dto = SendNotificationDTO.builder()
+                    .userId(authorId)
+                    .module("forum")
+                    .type("post_commented")
+                    .relatedId(postId)
+                    .relatedType("post")
+                    .priority(0)
+                    .variables(variables)
+                    .build();
+
+            notificationService.sendNotification(dto);
+            log.info("帖子评论通知已发送: authorId={}, commenterId={}, postId={}", authorId, commenterId, postId);
+        } catch (Exception e) {
+            log.error("发送帖子评论通知失败: postId={}", postId, e);
+        }
+    }
+
+    /**
+     * 7.8: 评论被回复通知（子回复触发）
+     *
+     * 📌 触发时机: CommentServiceImpl.addComment() parentId>0 时调用
+     * 📌 通知模板: FORUM_COMMENT_REPLIED  (type=comment_replied, module=forum)
+     * 📌 模板变量: replierNickname / replySnippet / postId
+     * 📌 跳转路径: /forum/list?postId={postId}
+     * 📌 防自通知: 操作者 == 被回复者 时跳过
+     *
+     * @param repliedUserId 被回复用户 ID（接收通知，通常是 PostComment.replyToUserId 或父评论作者）
+     * @param replierId     回复者 ID
+     * @param replySnippet  回复内容（前 50 字截断）
+     * @param postId        帖子 ID
+     */
+    @Async
+    public void sendCommentRepliedNotification(Long repliedUserId, Long replierId,
+                                               String replySnippet, Long postId) {
+        if (repliedUserId == null || replierId == null || postId == null) return;
+        if (repliedUserId.equals(replierId)) return;
+
+        try {
+            Map<String, Object> variables = new HashMap<>();
+            variables.put("replierNickname", getNickname(replierId));
+            variables.put("replySnippet",    truncate(replySnippet, 50));
+            variables.put("postId",          postId.toString());
+
+            SendNotificationDTO dto = SendNotificationDTO.builder()
+                    .userId(repliedUserId)
+                    .module("forum")
+                    .type("comment_replied")
+                    .relatedId(postId)
+                    .relatedType("post")
+                    .priority(0)
+                    .variables(variables)
+                    .build();
+
+            notificationService.sendNotification(dto);
+            log.info("评论回复通知已发送: repliedUserId={}, replierId={}, postId={}",
+                    repliedUserId, replierId, postId);
+        } catch (Exception e) {
+            log.error("发送评论回复通知失败: postId={}", postId, e);
+        }
+    }
+
+    /**
+     * 7.8: 帖子被收藏通知
+     *
+     * 📌 触发时机: PostServiceImpl.collectPost() 收藏成功后调用（取消收藏不通知）
+     * 📌 通知模板: FORUM_POST_COLLECTED  (type=post_collected, module=forum)
+     * 📌 模板变量: collectorNickname / postTitle / postId
+     * 📌 跳转路径: /forum/list?postId={postId}
+     * 📌 防自通知: 操作者 == 作者 时跳过
+     *
+     * @param authorId    帖子作者 ID（接收通知）
+     * @param collectorId 收藏者 ID
+     * @param postTitle   帖子标题
+     * @param postId      帖子 ID
+     */
+    @Async
+    public void sendPostCollectedNotification(Long authorId, Long collectorId,
+                                              String postTitle, Long postId) {
+        if (authorId == null || collectorId == null || postId == null) return;
+        if (authorId.equals(collectorId)) return;
+
+        try {
+            Map<String, Object> variables = new HashMap<>();
+            variables.put("collectorNickname", getNickname(collectorId));
+            variables.put("postTitle",         truncate(postTitle, 30));
+            variables.put("postId",            postId.toString());
+
+            SendNotificationDTO dto = SendNotificationDTO.builder()
+                    .userId(authorId)
+                    .module("forum")
+                    .type("post_collected")
+                    .relatedId(postId)
+                    .relatedType("post")
+                    .priority(0)
+                    .variables(variables)
+                    .build();
+
+            notificationService.sendNotification(dto);
+            log.info("帖子收藏通知已发送: authorId={}, collectorId={}, postId={}", authorId, collectorId, postId);
+        } catch (Exception e) {
+            log.error("发送帖子收藏通知失败: postId={}", postId, e);
+        }
+    }
+
+    /**
+     * 7.8: 帖子升为热门通知
+     *
+     * 📌 触发时机: ForumScheduler.calcHotScores() 检测到 is_hot 从 0→1 时调用，每帖一生只发一次
+     * 📌 通知模板: FORUM_POST_TRENDING  (type=post_trending, module=forum)
+     * 📌 模板变量: postTitle / postId
+     * 📌 跳转路径: /forum/list?postId={postId}
+     *
+     * @param authorId  帖子作者 ID（接收通知）
+     * @param postTitle 帖子标题
+     * @param postId    帖子 ID
+     */
+    @Async
+    public void sendPostTrendingNotification(Long authorId, String postTitle, Long postId) {
+        if (authorId == null || postId == null) return;
+
+        try {
+            Map<String, Object> variables = new HashMap<>();
+            variables.put("postTitle", truncate(postTitle, 30));
+            variables.put("postId",    postId.toString());
+
+            SendNotificationDTO dto = SendNotificationDTO.builder()
+                    .userId(authorId)
+                    .module("forum")
+                    .type("post_trending")
+                    .relatedId(postId)
+                    .relatedType("post")
+                    .priority(1)
+                    .variables(variables)
+                    .build();
+
+            notificationService.sendNotification(dto);
+            log.info("帖子升为热门通知已发送: authorId={}, postId={}", authorId, postId);
+        } catch (Exception e) {
+            log.error("发送热门帖子通知失败: postId={}", postId, e);
+        }
+    }
+
+    /**
+     * 7.8: 被@提及通知（批量发给 @ 列表中所有用户）
+     *
+     * 📌 触发时机: 评论/帖子内容解析出 @用户名 后批量调用（扩展功能，前端解析 @ 表达式 → 后端校验后批量通知）
+     * 📌 通知模板: FORUM_MENTIONED  (type=mentioned, module=forum)
+     * 📌 模板变量: mentionerNickname / postId
+     * 📌 跳转路径: /forum/list?postId={postId}
+     * 📌 防自通知: mentionedUserIds 自动剔除 mentionerId
+     *
+     * @param mentionerId       发起 @ 的用户 ID
+     * @param mentionedUserIds  被 @ 的用户 ID 列表
+     * @param postId            所在帖子 ID
+     */
+    @Async
+    public void sendMentionedNotification(Long mentionerId, List<Long> mentionedUserIds, Long postId) {
+        if (mentionerId == null || postId == null) return;
+        if (mentionedUserIds == null || mentionedUserIds.isEmpty()) return;
+
+        String mentionerNickname = getNickname(mentionerId);
+
+        for (Long userId : mentionedUserIds) {
+            if (userId == null) continue;
+            // 防自通知 + 防重复 @ 同一人由调用方保证
+            if (userId.equals(mentionerId)) continue;
+
+            try {
+                Map<String, Object> variables = new HashMap<>();
+                variables.put("mentionerNickname", mentionerNickname);
+                variables.put("postId",            postId.toString());
+
+                SendNotificationDTO dto = SendNotificationDTO.builder()
+                        .userId(userId)
+                        .module("forum")
+                        .type("mentioned")
+                        .relatedId(postId)
+                        .relatedType("post")
+                        .priority(0)
+                        .variables(variables)
+                        .build();
+
+                notificationService.sendNotification(dto);
+            } catch (Exception e) {
+                log.error("发送 @提及通知失败: mentionedUserId={}, postId={}", userId, postId, e);
+            }
+        }
+        log.info("@提及通知批量发送完成: mentionerId={}, count={}, postId={}",
+                mentionerId, mentionedUserIds.size(), postId);
     }
 
     /**

@@ -12,6 +12,13 @@ import lombok.Getter;
  * - 6.0   地理位置模块: 替换旧4个占位枚举 → 实际使用的2个
  *          删除: NEARBY_ACTIVITY / CHECKIN_SUCCESS / WEATHER_ALERT / LOCATION_RECOMMEND
  *          新增: LOCATION_CHECKIN_SUCCESS / LOCATION_WEATHER_SUITABLE
+ * - 7.8   论坛通知 9 种 code 标准化（与 NotificationHelper 实际发送的 type 字符串保持一致）:
+ *          FOLLOW("follow")        → USER_FOLLOWED("user_followed")
+ *          MENTION("mention")      → MENTIONED("mentioned")
+ *          HOT_POST("hot_post")    → POST_TRENDING("post_trending")
+ *          其余 6 个论坛枚举的 code 不变。
+ *          ⚠️ NotificationServiceImpl 用 module+type 拼接出 templateCode = "FORUM_USER_FOLLOWED" 等，
+ *             所以 enum.code 必须与 helper 发送的 type 字符串完全相同，否则 getByCode() 取不到中文名。
  */
 @Getter
 @AllArgsConstructor
@@ -34,15 +41,17 @@ public enum NotificationType {
     INSTALLATION_CANCELLED("installation_cancelled", "安装预约已取消", NotificationModule.MALL),
 
     // ==================== 论坛模块 (9种) ====================
+    // ⚠️ 7.8: code 必须与 NotificationHelper 调用 sendNotification 时的 type 字符串保持一致，
+    //         NotificationServiceImpl 用 module.toUpperCase() + "_" + type.toUpperCase() 查模板
     POST_LIKED("post_liked", "帖子被点赞", NotificationModule.FORUM),
     POST_COMMENTED("post_commented", "帖子被评论", NotificationModule.FORUM),
     COMMENT_REPLIED("comment_replied", "评论被回复", NotificationModule.FORUM),
     POST_COLLECTED("post_collected", "帖子被收藏", NotificationModule.FORUM),
-    MENTION("mention", "被@提及", NotificationModule.FORUM),
+    MENTIONED("mentioned", "被@提及", NotificationModule.FORUM),
     POST_APPROVED("post_approved", "帖子审核通过", NotificationModule.FORUM),
     POST_REJECTED("post_rejected", "帖子审核拒绝", NotificationModule.FORUM),
-    FOLLOW("follow", "被关注", NotificationModule.FORUM),
-    HOT_POST("hot_post", "帖子热门", NotificationModule.FORUM),
+    USER_FOLLOWED("user_followed", "被关注", NotificationModule.FORUM),
+    POST_TRENDING("post_trending", "帖子热门", NotificationModule.FORUM),
 
     // ==================== 课程模块 (9种) ====================
     COURSE_PURCHASED("course_purchased", "课程购买成功", NotificationModule.COURSE),

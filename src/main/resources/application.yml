@@ -82,7 +82,7 @@ astrometry:
 nasa:
   # API Key（每小时限额 1000 次，内存缓存保证每天实际只调用一次）
   # 申请地址: https://api.nasa.gov/
-  api-key: faxoHiBTRduPxmHntIYuRhpExwhnwk34m5NUOOVj
+  api-key: pdk1s49yJpCZ7O7xM6f01A7dBvhF7y1Ovh9Kimna
 
 # Knife4j配置
 knife4j:
