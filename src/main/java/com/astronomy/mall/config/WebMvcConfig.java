@@ -29,6 +29,9 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  *         Spring excludePathPatterns 不支持纯前缀匹配，必须加通配符
  *         /api/location/spot/* 可匹配 /spot/1、/spot/35 等带ID路径
  *         ⚠️ 不用 /api/location/spot/** 避免把 /spot/{id}/rating 也放行
+ * - 8.0   推荐系统: /api/recommend/home 和 /api/recommend/similar/* 使用可选认证
+ *         （未登录返回热门推荐，登录返回个性化推荐）
+ *         埋点和购物车推荐需要登录，不放行
  */
 @Configuration
 public class WebMvcConfig implements WebMvcConfigurer {

@@ -38,6 +38,18 @@ spring:
       max-file-size: 10MB
       max-request-size: 50MB
 
+  # 🆕 8.0 Redis 配置 (推荐系统浏览去重 + 结果缓存)
+  redis:
+    host: localhost
+    port: 6379
+    database: 0
+    timeout: 5000ms
+    lettuce:
+      pool:
+        max-active: 10
+        max-idle: 5
+        min-idle: 1
+
   # JSON配置
   jackson:
     date-format: yyyy-MM-dd HH:mm:ss
@@ -108,3 +120,14 @@ forum:
   # 帖子自动审核通过（true=发布即公开，false=需管理员审核）
   # 演示时建议开启，正式环境关闭
   auto-approve: true
+
+# ============================================================
+# 推荐系统配置 ← 8.0 新增
+# 方便答辩时现场调权重，无需重启
+# ============================================================
+recommend:
+  content-weight: 0.6     # 内容相似度权重
+  cf-weight: 0.3          # 协同过滤权重
+  coldstart-weight: 0.1   # 冷启动权重
+  cf-precompute: false    # demo 模式直接现算；生产环境改 true
+  post-hot-fallback: true # 帖子推荐结果不足时用 hot_score 兜底

@@ -78,7 +78,13 @@ public class JwtInterceptor implements HandlerInterceptor {
             "/api/post/comment/list", // 7.4: 评论列表公开，游客可查看评论
             "/api/post/user/profile/", // 7.5: 用户主页可选认证，游客可查看，登录后显示isFollowed
             "/api/post/search",      // 7.6: 帖子搜索可选认证
-            "/api/post/search/hot"   // 7.6: 热搜词公开
+            "/api/post/search/hot",  // 7.6: 热搜词公开
+            // 8.0: 推荐系统可选认证（未登录返回热门/通用推荐，登录返回个性化推荐）
+            "/api/recommend/home",            // 首页推荐
+            "/api/recommend/similar/",        // 相似商品推荐
+            "/api/recommend/spot/",           // 观测点→器材推荐（游客可看）
+            "/api/recommend/post/recommend",  // 帖子推荐
+            "/api/recommend/recognition/"     // AI识别→课程推荐
     );
 
     @Override

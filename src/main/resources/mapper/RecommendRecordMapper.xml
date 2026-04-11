@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.astronomy.mall.module.recommend.mapper.RecommendRecordMapper">
+
+    <!--
+        推荐曝光与点击记录统计 SQL
+        答辩场景：SELECT 总曝光量 + 点击率，一句话回答"推荐是否有效"
+    -->
+
+    <!-- 按推荐类型统计曝光量和点击率 -->
+    <select id="selectStatsByType" resultType="java.util.Map">
+        SELECT
+            recommend_type AS recommendType,
+            COUNT(*) AS totalExposure,
+            SUM(is_clicked) AS totalClicks,
+            ROUND(SUM(is_clicked) * 100.0 / COUNT(*), 2) AS clickRate
+        FROM tb_recommend_record
+        <where>
+            <if test="userId != null">
+                AND user_id = #{userId}
+            </if>
+            <if test="startTime != null">
+                AND create_time &gt;= #{startTime}
+            </if>
+        </where>
+        GROUP BY recommend_type
+    </select>
+
+    <!-- 按算法统计效果对比 -->
+    <select id="selectStatsByAlgorithm" resultType="java.util.Map">
+        SELECT
+            algorithm,
+            COUNT(*) AS totalExposure,
+            SUM(is_clicked) AS totalClicks,
+            ROUND(SUM(is_clicked) * 100.0 / COUNT(*), 2) AS clickRate
+        FROM tb_recommend_record
+        GROUP BY algorithm
+        ORDER BY clickRate DESC
+    </select>
+
+</mapper>
