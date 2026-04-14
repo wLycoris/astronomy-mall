@@ -38,6 +38,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import com.alibaba.fastjson.TypeReference;
+
 /**
  * 推荐系统核心实现
  *
@@ -95,11 +97,18 @@ public class RecommendServiceImpl implements RecommendService {
     @Override
     public void logProductBrowse(Long userId, BrowseLogDTO dto) {
         // Redis 30分钟去重: 同一用户同一商品 30 分钟内只记录一次
-        String dedupKey = "browse:dedup:" + userId + ":" + dto.getProductId();
-        Boolean isNew = stringRedisTemplate.opsForValue()
-                .setIfAbsent(dedupKey, "1", 30, TimeUnit.MINUTES);
+        // 🆕 8.2 优雅降级: Redis 不可用时跳过去重直接写库，不影响埋点
+        Boolean isNew = null;
+        try {
+            String dedupKey = "browse:dedup:" + userId + ":" + dto.getProductId();
+            isNew = stringRedisTemplate.opsForValue()
+                    .setIfAbsent(dedupKey, "1", 30, TimeUnit.MINUTES);
+        } catch (Exception e) {
+            log.warn("Redis 浏览去重失败, 降级直接写库: {}", e.getMessage());
+        }
 
-        if (Boolean.TRUE.equals(isNew)) {
+        // Redis 正常且非新浏览则跳过；Redis 异常(isNew==null)时直接写库
+        if (isNew == null || Boolean.TRUE.equals(isNew)) {
             BrowseLog browseLog = new BrowseLog();
             browseLog.setUserId(userId);
             browseLog.setProductId(dto.getProductId());
@@ -114,11 +123,18 @@ public class RecommendServiceImpl implements RecommendService {
     @Override
     public void logPostBrowse(Long userId, PostBrowseLogDTO dto) {
         // Redis 30分钟去重
-        String dedupKey = "post:browse:dedup:" + userId + ":" + dto.getPostId();
-        Boolean isNew = stringRedisTemplate.opsForValue()
-                .setIfAbsent(dedupKey, "1", 30, TimeUnit.MINUTES);
+        // 🆕 8.2 优雅降级: Redis 不可用时跳过去重直接写库
+        Boolean isNew = null;
+        try {
+            String dedupKey = "post:browse:dedup:" + userId + ":" + dto.getPostId();
+            isNew = stringRedisTemplate.opsForValue()
+                    .setIfAbsent(dedupKey, "1", 30, TimeUnit.MINUTES);
+        } catch (Exception e) {
+            log.warn("Redis 帖子浏览去重失败, 降级直接写库: {}", e.getMessage());
+        }
 
-        if (Boolean.TRUE.equals(isNew)) {
+        // Redis 正常且非新浏览则跳过；Redis 异常(isNew==null)时直接写库
+        if (isNew == null || Boolean.TRUE.equals(isNew)) {
             PostBrowseLog browseLog = new PostBrowseLog();
             browseLog.setUserId(userId);
             browseLog.setPostId(dto.getPostId());
@@ -149,11 +165,27 @@ public class RecommendServiceImpl implements RecommendService {
      */
     @Override
     public List<RecommendProductVO> getHomeRecommend(Long userId, int limit) {
-        // 未登录: 冷启动兜底
+        // 未登录: 冷启动兜底（不缓存，每次实时取热门）
         if (userId == null) {
             List<RecommendProductVO> result = coldStart(null, limit);
             saveExposureRecords(null, "product", "coldstart", result);
             return result;
+        }
+
+        // 📌 8.2 Redis 缓存: recommend:product:home:{userId} TTL=30min
+        String cacheKey = "recommend:product:home:" + userId;
+        try {
+            String cached = stringRedisTemplate.opsForValue().get(cacheKey);
+            if (cached != null) {
+                List<RecommendProductVO> cacheResult = JSON.parseObject(cached,
+                        new TypeReference<List<RecommendProductVO>>() {});
+                if (cacheResult != null && !cacheResult.isEmpty()) {
+                    log.debug("首页推荐命中缓存: userId={}, size={}", userId, cacheResult.size());
+                    return cacheResult;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Redis 读取首页推荐缓存失败, 降级实时计算: {}", e.getMessage());
         }
 
         // 1. 获取用户近期浏览的商品列表
@@ -273,7 +305,14 @@ public class RecommendServiceImpl implements RecommendService {
             }
         }
 
-        // 9. 异步记录曝光
+        // 9. 写入 Redis 缓存（30分钟过期）
+        try {
+            stringRedisTemplate.opsForValue().set(cacheKey, JSON.toJSONString(result), 30, TimeUnit.MINUTES);
+        } catch (Exception e) {
+            log.warn("Redis 写入首页推荐缓存失败: {}", e.getMessage());
+        }
+
+        // 10. 异步记录曝光
         saveExposureRecords(userId, "product", "mixed", result);
         return result;
     }
@@ -289,6 +328,22 @@ public class RecommendServiceImpl implements RecommendService {
      */
     @Override
     public List<RecommendProductVO> getSimilarProducts(Long productId, int limit) {
+        // 📌 8.2 Redis 缓存: recommend:product:similar:{productId} TTL=1h
+        String cacheKey = "recommend:product:similar:" + productId;
+        try {
+            String cached = stringRedisTemplate.opsForValue().get(cacheKey);
+            if (cached != null) {
+                List<RecommendProductVO> cacheResult = JSON.parseObject(cached,
+                        new TypeReference<List<RecommendProductVO>>() {});
+                if (cacheResult != null && !cacheResult.isEmpty()) {
+                    log.debug("相似商品命中缓存: productId={}, size={}", productId, cacheResult.size());
+                    return cacheResult;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Redis 读取相似商品缓存失败: {}", e.getMessage());
+        }
+
         Product target = productMapper.selectById(productId);
         if (target == null) {
             return Collections.emptyList();
@@ -327,6 +382,13 @@ public class RecommendServiceImpl implements RecommendService {
                 .limit(limit)
                 .collect(Collectors.toList());
 
+        // 写入 Redis 缓存（1小时过期，相似商品变化频率低）
+        try {
+            stringRedisTemplate.opsForValue().set(cacheKey, JSON.toJSONString(result), 1, TimeUnit.HOURS);
+        } catch (Exception e) {
+            log.warn("Redis 写入相似商品缓存失败: {}", e.getMessage());
+        }
+
         // 异步记录曝光
         saveExposureRecords(null, "product", "content", result);
         return result;
@@ -343,6 +405,22 @@ public class RecommendServiceImpl implements RecommendService {
      */
     @Override
     public List<RecommendProductVO> getCartRecommend(Long userId, int limit) {
+        // 📌 8.2 Redis 缓存: recommend:product:cart:{userId} TTL=10min（购物车变化频繁，短缓存）
+        String cacheKey = "recommend:product:cart:" + userId;
+        try {
+            String cached = stringRedisTemplate.opsForValue().get(cacheKey);
+            if (cached != null) {
+                List<RecommendProductVO> cacheResult = JSON.parseObject(cached,
+                        new TypeReference<List<RecommendProductVO>>() {});
+                if (cacheResult != null && !cacheResult.isEmpty()) {
+                    log.debug("购物车推荐命中缓存: userId={}, size={}", userId, cacheResult.size());
+                    return cacheResult;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Redis 读取购物车推荐缓存失败: {}", e.getMessage());
+        }
+
         // 1. 获取购物车商品
         List<CartVO> cartItems = cartMapper.selectCartListWithProduct(userId);
         if (cartItems == null || cartItems.isEmpty()) {
@@ -400,6 +478,13 @@ public class RecommendServiceImpl implements RecommendService {
                 .sorted((a, b) -> Double.compare(b.getScore(), a.getScore()))
                 .limit(limit)
                 .collect(Collectors.toList());
+
+        // 写入 Redis 缓存（10分钟过期，购物车变化频繁用短缓存）
+        try {
+            stringRedisTemplate.opsForValue().set(cacheKey, JSON.toJSONString(result), 10, TimeUnit.MINUTES);
+        } catch (Exception e) {
+            log.warn("Redis 写入购物车推荐缓存失败: {}", e.getMessage());
+        }
 
         saveExposureRecords(userId, "product", "content", result);
         return result;
@@ -712,19 +797,42 @@ public class RecommendServiceImpl implements RecommendService {
     // ======================== 内部工具方法 ========================
 
     /**
-     * 解析 JSON 数组格式的标签字符串为 Set
+     * 解析标签字符串为 Set
+     * 兼容两种历史格式：
+     *   1. JSON 数组:       ["深空摄影","天文相机"]
+     *   2. 分隔符字符串:    "深空摄影,天文相机,窄带滤镜"（中/英文逗号、顿号）
+     * 任何异常下返回空集合，保证推荐算法可降级运行
      */
     private Set<String> parseTags(String tagsJson) {
         if (tagsJson == null || tagsJson.trim().isEmpty() || "[]".equals(tagsJson.trim())) {
             return Collections.emptySet();
         }
-        try {
-            List<String> list = JSON.parseArray(tagsJson, String.class);
-            return new HashSet<>(list);
-        } catch (Exception e) {
-            log.warn("标签JSON解析失败: {}", tagsJson);
-            return Collections.emptySet();
+        String trimmed = tagsJson.trim();
+        // 仅当以 [ 开头时才尝试 JSON 解析，避免普通 CSV 字符串触发解析异常
+        if (trimmed.startsWith("[")) {
+            try {
+                List<String> list = JSON.parseArray(trimmed, String.class);
+                Set<String> set = new HashSet<>();
+                for (String s : list) {
+                    if (s != null && !s.trim().isEmpty()) {
+                        set.add(s.trim());
+                    }
+                }
+                return set;
+            } catch (Exception e) {
+                log.debug("标签JSON解析失败, 尝试按分隔符拆分: {}", trimmed);
+                // 继续走下方 CSV 兜底
+            }
         }
+        // CSV / 顿号 兜底：按中英文逗号、顿号切分
+        Set<String> set = new HashSet<>();
+        for (String s : trimmed.split("[,，、]")) {
+            String t = s.trim();
+            if (!t.isEmpty()) {
+                set.add(t);
+            }
+        }
+        return set;
     }
 
     /**
