@@ -5,7 +5,6 @@ import com.astronomy.mall.module.recommend.dto.BrowseLogDTO;
 import com.astronomy.mall.module.recommend.dto.PostBrowseLogDTO;
 import com.astronomy.mall.module.recommend.dto.RecommendClickDTO;
 import com.astronomy.mall.module.recommend.service.RecommendService;
-import com.astronomy.mall.module.recommend.vo.RecommendPostVO;
 import com.astronomy.mall.module.recommend.vo.RecommendProductVO;
 import com.astronomy.mall.utils.UserContext;
 import io.swagger.annotations.Api;
@@ -18,6 +17,7 @@ import javax.annotation.Resource;
 import javax.servlet.http.HttpServletRequest;
 import javax.validation.Valid;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 推荐系统接口
@@ -122,13 +122,14 @@ public class RecommendController {
     }
 
     @GetMapping("/post/recommend")
-    @ApiOperation("帖子个性化推荐(论坛'为你推荐'Tab)")
-    public Result<List<RecommendPostVO>> getPostRecommend(
+    @ApiOperation("帖子个性化推荐(论坛'推荐'Tab，瀑布流分页)")
+    public Result<Map<String, Object>> getPostRecommend(
             HttpServletRequest request,
-            @ApiParam("数量(默认10)") @RequestParam(defaultValue = "10") int limit) {
+            @ApiParam("页码(默认1)") @RequestParam(defaultValue = "1") int pageNum,
+            @ApiParam("每页数量(默认50)") @RequestParam(defaultValue = "50") int pageSize) {
         Long userId = (Long) request.getAttribute("userId");
-        List<RecommendPostVO> list = recommendService.getPostRecommend(userId, limit);
-        return Result.success(list);
+        Map<String, Object> data = recommendService.getPostRecommend(userId, pageNum, pageSize);
+        return Result.success(data);
     }
 
     // ======================== 效果回写 ========================

@@ -14,8 +14,17 @@ import com.astronomy.mall.module.recommend.mapper.PostBrowseLogMapper;
 import com.astronomy.mall.module.recommend.mapper.RecommendRecordMapper;
 import com.astronomy.mall.module.cart.mapper.CartMapper;
 import com.astronomy.mall.module.cart.vo.CartVO;
+import com.astronomy.mall.module.course.entity.Course;
+import com.astronomy.mall.module.course.entity.CourseProgress;
+import com.astronomy.mall.module.course.mapper.CourseMapper;
+import com.astronomy.mall.module.course.mapper.CourseProgressMapper;
+import com.astronomy.mall.module.course.vo.CourseVO;
 import com.astronomy.mall.module.forum.entity.Post;
 import com.astronomy.mall.module.forum.mapper.PostMapper;
+import com.astronomy.mall.module.location.entity.ObservationSpot;
+import com.astronomy.mall.module.location.mapper.ObservationSpotMapper;
+import com.astronomy.mall.module.recognition.entity.Recognition;
+import com.astronomy.mall.module.recognition.mapper.RecognitionMapper;
 import com.astronomy.mall.module.recommend.service.CfRecommendService;
 import com.astronomy.mall.module.recommend.service.RecommendService;
 import com.astronomy.mall.module.recommend.vo.RecommendPostVO;
@@ -75,6 +84,16 @@ public class RecommendServiceImpl implements RecommendService {
     private PostMapper postMapper;
     @Resource
     private StringRedisTemplate stringRedisTemplate;
+
+    // 8.3 跨模块联动所需
+    @Resource
+    private RecognitionMapper recognitionMapper;
+    @Resource
+    private CourseMapper courseMapper;
+    @Resource
+    private CourseProgressMapper courseProgressMapper;
+    @Resource
+    private ObservationSpotMapper observationSpotMapper;
 
     /** 内容相似度权重 */
     @Value("${recommend.content-weight:0.6}")
@@ -490,154 +509,469 @@ public class RecommendServiceImpl implements RecommendService {
         return result;
     }
 
-    // ======================== 跨模块联动 ========================
+    // ======================== 跨模块联动（8.3） ========================
 
+    /**
+     * 🆕 8.3.1 英文机器标签 → 中文课程标签 映射
+     *
+     * Astrometry.net 返回的 machine_tags 全部是英文（如 "nebula"、"galaxy"），
+     * 而课程/商品库里的 tags 是中文（如 "星云摄影"、"星系观测"）。
+     * 为了让「AI识别→推荐课程」能跑通，在这里静态映射 8~10 个高频天体类型。
+     *
+     * 📌 设计考量:
+     * - 一个英文标签可映射多个中文候选关键字（LIKE 模糊匹配，命中任一即可）
+     * - 大小写不敏感：查询前会 toLowerCase
+     * - 未命中的英文标签直接丢弃，不做错误兜底
+     * - 如果整个 machine_tags 解析后为空或全部未命中，返回空让上层走热门兜底
+     */
+    private static final Map<String, List<String>> EN_TO_ZH_TAG_MAPPING = new HashMap<String, List<String>>() {{
+        // 星云类（弥漫星云、行星状星云、发射星云等）
+        put("nebula", Arrays.asList("星云", "深空"));
+        put("emission nebula", Arrays.asList("星云", "深空"));
+        put("planetary nebula", Arrays.asList("星云", "深空"));
+        // 星系类
+        put("galaxy", Arrays.asList("星系", "深空"));
+        // 行星
+        put("planet", Arrays.asList("行星", "太阳系"));
+        // 恒星 / 星团
+        put("star", Arrays.asList("恒星", "星座"));
+        put("star cluster", Arrays.asList("星团", "深空"));
+        put("cluster", Arrays.asList("星团", "深空"));
+        // 月亮 / 太阳 / 彗星 / 小行星
+        put("moon", Arrays.asList("月球", "月亮"));
+        put("sun", Arrays.asList("太阳", "日面"));
+        put("comet", Arrays.asList("彗星"));
+        put("asteroid", Arrays.asList("小行星", "太阳系"));
+    }};
+
+    /**
+     * 🆕 8.3.1  AI识别 → 推荐相关课程
+     *
+     * 📌 算法流程:
+     *   1. 查 tb_recognition.machine_tags（由 Astrometry.net 异步回写）
+     *   2. 英文标签 → 中文关键字（通过 EN_TO_ZH_TAG_MAPPING 映射）
+     *   3. 用 LIKE '%关键字%' 查 tb_course.tags（status=1 已发布）
+     *   4. Java 侧过滤掉用户已学过的课程（tb_course_progress 有记录）
+     *   5. 按 view_count 倒序（CourseMapper.getRecommendByTags 已处理）
+     *   6. 三级兜底: 机器标签为空/全部未命中 → 热门课程；命中不足 → 热门补齐
+     *
+     * 📌 返回 List<Object> 以兼容 Controller 签名；内部实际是 List<CourseVO>
+     *
+     * @param recognitionId  识别记录 ID
+     * @param limit          返回课程数上限
+     */
     @Override
     public List<Object> getRecognitionCourseRecommend(Long recognitionId, int limit) {
-        // TODO 8.3 填充: machine_tags → 课程 tags 匹配
-        return Collections.emptyList();
-    }
+        if (recognitionId == null || limit <= 0) {
+            return Collections.emptyList();
+        }
 
-    @Override
-    public List<Object> getNextCourseRecommend(Long userId, Long courseId, int limit) {
-        // TODO 8.3 填充: 基于已学课程 tags 推荐下一门
-        return Collections.emptyList();
-    }
+        // 1. 查识别记录
+        Recognition recognition = recognitionMapper.selectById(recognitionId);
+        if (recognition == null || recognition.getStatus() == null || recognition.getStatus() != 1) {
+            log.debug("[8.3.1] 识别记录不存在或未成功, id={}", recognitionId);
+            return Collections.emptyList();
+        }
+        Long userId = recognition.getUserId();  // 可能为 null（游客）
 
-    @Override
-    public List<RecommendProductVO> getSpotEquipmentRecommend(Long spotId, int limit) {
-        // TODO 8.3 填充: 海拔/光污染 → 器材过滤 + tags 排序
-        return Collections.emptyList();
+        // 2. 解析 machine_tags 并映射为中文关键字
+        Set<String> machineTags = parseTags(recognition.getMachineTags());
+        Set<String> zhKeywords = new LinkedHashSet<>();
+        for (String tag : machineTags) {
+            if (tag == null) continue;
+            List<String> mapped = EN_TO_ZH_TAG_MAPPING.get(tag.toLowerCase().trim());
+            if (mapped != null) {
+                zhKeywords.addAll(mapped);
+            }
+        }
+        log.debug("[8.3.1] recognitionId={} machineTags={} → zhKeywords={}",
+                recognitionId, machineTags, zhKeywords);
+
+        // 3. 收集该用户已学课程 ID（用于 Java 侧排除）
+        Set<Long> learnedCourseIds = getLearnedCourseIds(userId);
+
+        List<CourseVO> matched = Collections.emptyList();
+        // 4. 机器标签有映射 → 走标签推荐
+        if (!zhKeywords.isEmpty()) {
+            // 多取一些冗余数据（limit*3），后续 Java 过滤/截断
+            List<CourseVO> raw = courseMapper.getRecommendByTags(userId,
+                    new ArrayList<>(zhKeywords), limit * 3);
+            matched = raw.stream()
+                    .filter(vo -> !learnedCourseIds.contains(vo.getId()))
+                    .limit(limit)
+                    .collect(Collectors.toList());
+        }
+
+        // 5. 命中不足 → 用热门课程补齐（排除已入选 + 已学）
+        if (matched.size() < limit) {
+            Set<Long> existIds = matched.stream().map(CourseVO::getId).collect(Collectors.toSet());
+            existIds.addAll(learnedCourseIds);
+            List<CourseVO> hot = courseMapper.getHotCourses(userId, limit * 2).stream()
+                    .filter(vo -> !existIds.contains(vo.getId()))
+                    .limit(limit - matched.size())
+                    .collect(Collectors.toList());
+            List<CourseVO> merged = new ArrayList<>(matched);
+            merged.addAll(hot);
+            matched = merged;
+        }
+
+        log.info("[8.3.1] recognitionId={} userId={} 最终推荐 {} 门课程",
+                recognitionId, userId, matched.size());
+
+        // 6. 曝光记录（List<Object>，saveExposureRecords 里对非 Product/Post 类型静默跳过）
+        return new ArrayList<>(matched);
     }
 
     /**
-     * 帖子个性化推荐（论坛"为你推荐"Tab）
+     * 🆕 8.3.2  完课 → 推荐下一门课程
      *
-     * 📌 算法:
-     * 1. 已登录 → 获取用户近期浏览帖子的 tags 并集作为兴趣画像
-     * 2. 候选集: 已发布(status=2)帖子中与画像 tags 有交集的
-     * 3. 按 postContentSimilarity（纯标签 Jaccard）排序
-     * 4. 不足时用 hot_score 兜底
-     * 5. 未登录 → 直接返回热门帖子
+     * 📌 算法流程:
+     *   1. 查当前课程 tags
+     *   2. 用当前课程 tags 去 LIKE 匹配候选课程（排除自身 + 排除已学）
+     *   3. 在 Java 侧用 Jaccard 相似度对候选排序（与当前课程标签集越接近越靠前）
+     *   4. 不足时用热门课程兜底
+     *
+     * 📌 为什么二次用 Jaccard:
+     *   DB LIKE 只能判断"命中/不命中"，多标签候选无法体现"和目标课程多像"。
+     *   Jaccard 在 Java 侧做精排，既保持 SQL 简单，又能给论文提供算法亮点。
+     *
+     * @param userId    当前登录用户 ID（需鉴权，必定非空）
+     * @param courseId  当前已完成的课程 ID
+     * @param limit     返回数量上限
      */
     @Override
-    public List<RecommendPostVO> getPostRecommend(Long userId, int limit) {
-        // 未登录或无浏览历史: 热门帖子兜底
-        if (userId == null) {
-            return getHotPosts(limit);
+    public List<Object> getNextCourseRecommend(Long userId, Long courseId, int limit) {
+        if (userId == null || courseId == null || limit <= 0) {
+            return Collections.emptyList();
         }
 
-        // 1. 获取用户近期浏览的帖子
-        List<Long> recentPostIds = postBrowseLogMapper.selectRecentPostIds(userId, 30);
-        if (recentPostIds.isEmpty()) {
-            // 无浏览历史: 尝试用 interest_tags 匹配帖子
-            User user = userMapper.selectById(userId);
-            if (user != null && user.getInterestTags() != null && !"[]".equals(user.getInterestTags())) {
-                return getPostsByUserInterest(user.getInterestTags(), userId, limit);
-            }
-            return getHotPosts(limit);
+        // 1. 查当前课程
+        Course current = courseMapper.selectById(courseId);
+        if (current == null || current.getStatus() == null || current.getStatus() != 1) {
+            log.debug("[8.3.2] 当前课程不存在或未发布, id={}", courseId);
+            return Collections.emptyList();
         }
 
-        // 2. 合并浏览帖子的 tags 为用户画像
-        List<Post> recentPosts = postMapper.selectBatchIds(recentPostIds);
-        Set<String> userTagProfile = new HashSet<>();
-        for (Post p : recentPosts) {
-            userTagProfile.addAll(parseTags(p.getTags()));
-        }
+        // 2. 已学课程集合（包含当前课程）
+        Set<Long> learnedCourseIds = getLearnedCourseIds(userId);
+        learnedCourseIds.add(courseId);  // 即使完成记录还未写 DB，也要排除
 
-        if (userTagProfile.isEmpty()) {
-            return getHotPosts(limit);
-        }
+        // 3. 解析当前课程 tags → 作为候选匹配的标签池
+        Set<String> currentTags = parseTags(current.getTags());
 
-        // 3. 候选帖子: 已发布 + 有标签交集 + 排除已浏览
-        String userTagsJson = JSON.toJSONString(new ArrayList<>(userTagProfile));
-        LambdaQueryWrapper<Post> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(Post::getStatus, 2)
-                .notIn(Post::getId, recentPostIds)
-                .and(w -> {
-                    boolean first = true;
-                    for (String tag : userTagProfile) {
-                        if (first) {
-                            w.like(Post::getTags, "\"" + tag + "\"");
-                            first = false;
-                        } else {
-                            w.or().like(Post::getTags, "\"" + tag + "\"");
-                        }
-                    }
-                })
-                .last("LIMIT 100");
-        List<Post> candidates = postMapper.selectList(wrapper);
+        List<CourseVO> ranked = Collections.emptyList();
+        if (!currentTags.isEmpty()) {
+            // 用 tags LIKE 粗召回（放大到 limit*4，给 Jaccard 精排留余量）
+            List<CourseVO> candidates = courseMapper.getRecommendByTags(userId,
+                    new ArrayList<>(currentTags), limit * 4);
 
-        // 4. 按帖子内容相似度排序
-        List<RecommendPostVO> result = candidates.stream()
-                .map(post -> {
-                    double sim = postContentSimilarity(userTagsJson, post.getTags());
-                    RecommendPostVO vo = toPostVO(post, "content");
-                    vo.setScore(sim);
-                    return vo;
-                })
-                .filter(vo -> vo.getScore() > 0)
-                .sorted((a, b) -> Double.compare(b.getScore(), a.getScore()))
-                .limit(limit)
-                .collect(Collectors.toList());
-
-        // 5. 不足 limit 时用 hot_score 兜底
-        if (postHotFallback && result.size() < limit) {
-            Set<Long> existIds = result.stream().map(RecommendPostVO::getId).collect(Collectors.toSet());
-            existIds.addAll(recentPostIds);
-            List<RecommendPostVO> hotFallback = getHotPosts(limit - result.size()).stream()
-                    .filter(vo -> !existIds.contains(vo.getId()))
+            // Java 侧: 排除已学 + 用 Jaccard 精排
+            final String currentTagsJson = current.getTags();
+            ranked = candidates.stream()
+                    .filter(vo -> !learnedCourseIds.contains(vo.getId()))
+                    .sorted((a, b) -> {
+                        double simA = jaccardSimilarity(currentTagsJson, a.getTags());
+                        double simB = jaccardSimilarity(currentTagsJson, b.getTags());
+                        return Double.compare(simB, simA);  // 降序
+                    })
+                    .limit(limit)
                     .collect(Collectors.toList());
-            result.addAll(hotFallback);
         }
 
-        saveExposureRecords(userId, "post", "content", result);
+        // 4. 不足时热门兜底
+        if (ranked.size() < limit) {
+            Set<Long> existIds = ranked.stream().map(CourseVO::getId).collect(Collectors.toSet());
+            existIds.addAll(learnedCourseIds);
+            List<CourseVO> hot = courseMapper.getHotCourses(userId, limit * 2).stream()
+                    .filter(vo -> !existIds.contains(vo.getId()))
+                    .limit(limit - ranked.size())
+                    .collect(Collectors.toList());
+            List<CourseVO> merged = new ArrayList<>(ranked);
+            merged.addAll(hot);
+            ranked = merged;
+        }
+
+        log.info("[8.3.2] userId={} courseId={} 推荐下一门课程 {} 条",
+                userId, courseId, ranked.size());
+
+        return new ArrayList<>(ranked);
+    }
+
+    /**
+     * 🆕 8.3.3  签到观测点 → 推荐适合器材
+     *
+     * 📌 算法流程（论文可描述为「规则前置过滤 + 内容相似度排序」）:
+     *
+     *   Step 1: 根据观测点物理条件生成目标标签池
+     *     - altitude > 2000m && lightPollutionLevel ≤ 3  →  深空摄影器材（黑暗高海拔）
+     *     - altitude > 1000m                             →  深空 / 便携组合
+     *     - 其余                                          →  入门 / 便携 / 月球/行星
+     *
+     *   Step 2: 用 selectByTagsAny 召回候选商品（放大到 limit*3）
+     *
+     *   Step 3: 综合排序 = Jaccard(tags, 目标标签) × 0.6 + 归一化销量 × 0.4
+     *
+     *   Step 4: Redis 缓存 30 分钟（观测点物理属性几乎不变，可放心缓存）
+     *
+     *   Step 5: 无命中则走热门商品兜底
+     *
+     * @param spotId 观测点 ID
+     * @param limit  返回上限
+     */
+    @Override
+    public List<RecommendProductVO> getSpotEquipmentRecommend(Long spotId, int limit) {
+        if (spotId == null || limit <= 0) {
+            return Collections.emptyList();
+        }
+
+        // Redis 缓存: 30 分钟（观测点物理属性基本恒定）
+        String cacheKey = "recommend:spot:equipment:" + spotId + ":" + limit;
+        try {
+            String cached = stringRedisTemplate.opsForValue().get(cacheKey);
+            if (cached != null) {
+                List<RecommendProductVO> list = JSON.parseArray(cached, RecommendProductVO.class);
+                if (list != null) {
+                    log.debug("[8.3.3] Redis 命中 spotId={} limit={}", spotId, limit);
+                    return list;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("[8.3.3] Redis 读取失败: {}", e.getMessage());
+        }
+
+        // 1. 查观测点
+        ObservationSpot spot = observationSpotMapper.selectById(spotId);
+        if (spot == null) {
+            log.debug("[8.3.3] 观测点不存在 spotId={}", spotId);
+            return Collections.emptyList();
+        }
+
+        // 2. 规则前置过滤: 根据海拔 + 光污染等级生成目标标签池
+        List<String> targetTags = buildSpotTargetTags(spot);
+        log.debug("[8.3.3] spotId={} altitude={} lightLv={} → targetTags={}",
+                spotId, spot.getAltitude(), spot.getLightPollutionLevel(), targetTags);
+
+        // 3. 粗召回
+        List<Product> candidates = selectByTagsAny(targetTags, limit * 3);
+
+        List<RecommendProductVO> result;
+        if (candidates.isEmpty()) {
+            // 无命中 → 热门商品兜底
+            log.info("[8.3.3] spotId={} 标签无命中，走热门兜底", spotId);
+            result = selectHotProducts(limit).stream()
+                    .map(p -> toProductVO(p, "热门推荐", "hot"))
+                    .collect(Collectors.toList());
+        } else {
+            // 4. 归一化销量（Min-Max）
+            int maxSales = candidates.stream()
+                    .mapToInt(p -> p.getSales() == null ? 0 : p.getSales())
+                    .max().orElse(0);
+            final double maxSalesD = maxSales == 0 ? 1.0 : maxSales;
+
+            // 5. 综合评分: Jaccard × 0.6 + 归一化销量 × 0.4
+            String targetTagsJson = JSON.toJSONString(targetTags);
+            result = candidates.stream()
+                    .map(p -> {
+                        double jaccard = jaccardSimilarity(targetTagsJson, p.getTags());
+                        double normSales = (p.getSales() == null ? 0 : p.getSales()) / maxSalesD;
+                        double score = jaccard * 0.6 + normSales * 0.4;
+
+                        RecommendProductVO vo = toProductVO(p, "适合该观测点", "content");
+                        vo.setScore(score);
+                        return vo;
+                    })
+                    .sorted((a, b) -> Double.compare(b.getScore(), a.getScore()))
+                    .limit(limit)
+                    .collect(Collectors.toList());
+        }
+
+        // 6. 写缓存（优雅降级）
+        try {
+            stringRedisTemplate.opsForValue().set(cacheKey, JSON.toJSONString(result), 30, TimeUnit.MINUTES);
+        } catch (Exception e) {
+            log.warn("[8.3.3] Redis 写入失败: {}", e.getMessage());
+        }
+
+        log.info("[8.3.3] spotId={} 推荐器材 {} 件", spotId, result.size());
         return result;
     }
 
     /**
-     * 根据用户 interest_tags 匹配帖子（冷启动分支）
+     * 🆕 8.3 辅助: 查询用户已学过的课程 ID 集合
+     * （userId 为 null 时返回空集合，用于识别模块的游客场景）
      */
-    private List<RecommendPostVO> getPostsByUserInterest(String interestTagsJson, Long userId, int limit) {
-        Set<String> tags = parseTags(interestTagsJson);
-        if (tags.isEmpty()) {
-            return getHotPosts(limit);
+    private Set<Long> getLearnedCourseIds(Long userId) {
+        if (userId == null) {
+            return Collections.emptySet();
         }
-
-        LambdaQueryWrapper<Post> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(Post::getStatus, 2)
-                .ne(Post::getUserId, userId)
-                .and(w -> {
-                    boolean first = true;
-                    for (String tag : tags) {
-                        if (first) {
-                            w.like(Post::getTags, "\"" + tag + "\"");
-                            first = false;
-                        } else {
-                            w.or().like(Post::getTags, "\"" + tag + "\"");
-                        }
-                    }
-                })
-                .orderByDesc(Post::getHotScore)
-                .last("LIMIT " + limit);
-        List<Post> posts = postMapper.selectList(wrapper);
-        return posts.stream()
-                .map(p -> toPostVO(p, "coldstart"))
-                .collect(Collectors.toList());
+        try {
+            LambdaQueryWrapper<CourseProgress> wrapper = new LambdaQueryWrapper<>();
+            wrapper.eq(CourseProgress::getUserId, userId)
+                    .select(CourseProgress::getCourseId);
+            List<CourseProgress> list = courseProgressMapper.selectList(wrapper);
+            return list.stream()
+                    .map(CourseProgress::getCourseId)
+                    .collect(Collectors.toSet());
+        } catch (Exception e) {
+            log.warn("[8.3] 查询用户已学课程失败 userId={}: {}", userId, e.getMessage());
+            return Collections.emptySet();
+        }
     }
 
     /**
-     * 热门帖子（按 hot_score 倒序）
+     * 🆕 8.3.3 辅助: 根据观测点物理属性生成目标标签池
+     *
+     * 规则说明:
+     *   海拔 > 2000m 且 光污染 ≤ 3 (Bortle 1-3 暗天) → 专业深空摄影场景
+     *   海拔 > 1000m                               → 深空 + 便携组合
+     *   其他（市区/郊区/低海拔）                       → 入门 / 便携 / 月面行星观测
+     *
+     * @return 候选标签列表（用于 LIKE 召回）
      */
-    private List<RecommendPostVO> getHotPosts(int limit) {
+    private List<String> buildSpotTargetTags(ObservationSpot spot) {
+        int altitude = spot.getAltitude() == null ? 0 : spot.getAltitude();
+        int lightLv = spot.getLightPollutionLevel() == null ? 9 : spot.getLightPollutionLevel();
+
+        if (altitude > 2000 && lightLv <= 3) {
+            // 高海拔 + 极暗天：适合深空摄影
+            return Arrays.asList("深空摄影", "天文相机", "赤道仪", "滤镜", "星云", "星系");
+        } else if (altitude > 1000) {
+            // 中海拔：深空 + 便携
+            return Arrays.asList("深空", "便携", "望远镜", "双筒", "追星");
+        } else {
+            // 城市/郊区：入门为主
+            return Arrays.asList("入门", "便携", "双筒", "月球", "行星", "目镜");
+        }
+    }
+
+    /**
+     * 帖子个性化推荐（论坛"推荐"Tab，瀑布流分页）
+     *
+     * 📌 算法（重构 v8.58 final）:
+     * ✅ 核心思想：【召回全部 + 打分排序 + 永不过滤】
+     *   像小红书/抖音一样，推荐页必须把 pageSize 填满，不会因"浏览过""自己发的"而留白。
+     *
+     * 步骤:
+     * 1. 召回：所有 status=2 已发布帖子（不排除自己、不排除已浏览的，只是后续降权）
+     * 2. 评分：score = α·jaccard + β·normHot + γ·freshness - 惩罚项
+     *     - jaccard     : 与用户画像 tag 交集（有画像时生效）
+     *     - normHot     : hot_score / max(hot_score)，归一化 [0,1]
+     *     - freshness   : 越新越高（指数衰减，30 天半衰期）
+     *     - 已浏览惩罚  : -0.25（让它们排后面但仍展示）
+     *     - 自己帖轻惩  : -0.05
+     * 3. 排序：score DESC 全量排序
+     * 4. 分页：pageNum/pageSize 切片
+     * 5. 无画像（未登录/无浏览/无 interest_tags）：纯热度 + 时效排序
+     *
+     * 📌 权重:
+     *   有画像: jaccard*0.5 + normHot*0.3 + freshness*0.2
+     *   无画像: normHot*0.7 + freshness*0.3
+     */
+    @Override
+    public Map<String, Object> getPostRecommend(Long userId, int pageNum, int pageSize) {
+        if (pageNum < 1) pageNum = 1;
+        if (pageSize < 1 || pageSize > 100) pageSize = 50;
+
+        // 1. 构建用户画像（tag 集合）+ 已浏览帖子 ID 集合（用于降权）
+        Set<String> userTagProfile = new HashSet<>();
+        Set<Long> recentPostIdSet = new HashSet<>();
+        if (userId != null) {
+            List<Long> recentPostIds = postBrowseLogMapper.selectRecentPostIds(userId, 30);
+            if (!recentPostIds.isEmpty()) {
+                recentPostIdSet.addAll(recentPostIds);
+                List<Post> recentPosts = postMapper.selectBatchIds(recentPostIds);
+                for (Post p : recentPosts) {
+                    userTagProfile.addAll(parseTags(p.getTags()));
+                }
+            }
+            // 浏览历史 tags 为空，回退到 interest_tags 冷启动画像
+            if (userTagProfile.isEmpty()) {
+                User user = userMapper.selectById(userId);
+                if (user != null && user.getInterestTags() != null) {
+                    userTagProfile.addAll(parseTags(user.getInterestTags()));
+                }
+            }
+        }
+
+        // 2. 召回全部 status=2 帖子（不做任何排除，只降权）
+        //    限 1000 条上限，避免全表排序；瀑布流真实场景 1000 条远够用
         LambdaQueryWrapper<Post> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(Post::getStatus, 2)
-                .orderByDesc(Post::getHotScore)
-                .last("LIMIT " + limit);
-        List<Post> posts = postMapper.selectList(wrapper);
-        return posts.stream()
-                .map(p -> toPostVO(p, "hot"))
+        wrapper.eq(Post::getStatus, 2).last("LIMIT 1000");
+        List<Post> candidates = postMapper.selectList(wrapper);
+
+        // 3. 归一化因子计算
+        double maxHot = 0.0;
+        for (Post p : candidates) {
+            if (p.getHotScore() != null && p.getHotScore() > maxHot) maxHot = p.getHotScore();
+        }
+        if (maxHot <= 0) maxHot = 1.0;
+
+        final double maxHotFinal = maxHot;
+        final String userTagsJson = userTagProfile.isEmpty() ? null
+                : JSON.toJSONString(new ArrayList<>(userTagProfile));
+        final boolean hasProfile = userTagsJson != null;
+        final long nowMs = System.currentTimeMillis();
+        final long halfLifeMs = 30L * 24 * 3600 * 1000; // 30 天半衰期
+        final Long currentUserId = userId;
+
+        // 4. 评分 + 排序
+        List<RecommendPostVO> allScored = candidates.stream()
+                .map(post -> {
+                    // (a) 热度归一化
+                    double normHot = (post.getHotScore() == null ? 0.0 : post.getHotScore()) / maxHotFinal;
+
+                    // (b) 时效性：半衰期 30 天的指数衰减
+                    double freshness = 1.0;
+                    if (post.getCreateTime() != null) {
+                        long ageMs = nowMs - post.getCreateTime()
+                                .atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli();
+                        if (ageMs > 0) {
+                            freshness = Math.pow(0.5, (double) ageMs / halfLifeMs);
+                        }
+                    }
+
+                    // (c) 内容相似度（有画像时才算）
+                    double jaccard = hasProfile ? postContentSimilarity(userTagsJson, post.getTags()) : 0.0;
+
+                    // (d) 综合分
+                    double score = hasProfile
+                            ? (jaccard * 0.5 + normHot * 0.3 + freshness * 0.2)
+                            : (normHot * 0.7 + freshness * 0.3);
+
+                    // (e) 降权项：已浏览 -0.25，自己发的 -0.05
+                    if (recentPostIdSet.contains(post.getId())) score -= 0.25;
+                    if (currentUserId != null && currentUserId.equals(post.getUserId())) score -= 0.05;
+
+                    RecommendPostVO vo = toPostVO(post, hasProfile ? "content" : "hot");
+                    vo.setScore(score);
+                    return vo;
+                })
+                .sorted((a, b) -> Double.compare(b.getScore(), a.getScore()))
                 .collect(Collectors.toList());
+
+        long total = allScored.size();
+
+        // 5. 分页切片
+        int from = (pageNum - 1) * pageSize;
+        int to = Math.min(from + pageSize, allScored.size());
+        List<RecommendPostVO> pageList = from >= allScored.size()
+                ? Collections.emptyList()
+                : allScored.subList(from, to);
+
+        // 仅第一页曝光埋点，避免分页重复
+        if (userId != null && pageNum == 1 && !pageList.isEmpty()) {
+            saveExposureRecords(userId, "post", hasProfile ? "content" : "hot", pageList);
+        }
+
+        log.info("[8.3.4] userId={} pageNum={} pageSize={} 候选={} 返回={} 总数={} hasProfile={}",
+                userId, pageNum, pageSize, candidates.size(), pageList.size(), total, hasProfile);
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("list", pageList);
+        result.put("total", total);
+        result.put("pageNum", pageNum);
+        result.put("pageSize", pageSize);
+        return result;
     }
 
     /**

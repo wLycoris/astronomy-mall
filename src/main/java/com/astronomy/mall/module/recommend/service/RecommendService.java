@@ -7,6 +7,7 @@ import com.astronomy.mall.module.recommend.vo.RecommendPostVO;
 import com.astronomy.mall.module.recommend.vo.RecommendProductVO;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 推荐系统核心 Service
@@ -78,10 +79,19 @@ public interface RecommendService {
     List<RecommendProductVO> getSpotEquipmentRecommend(Long spotId, int limit);
 
     /**
-     * 帖子个性化推荐（论坛"为你推荐"Tab）
-     * 基于浏览历史的帖子 tags 内容相似度
+     * 帖子个性化推荐（论坛"推荐"Tab，瀑布流分页）
+     *
+     * 算法（重构 v8.58）：
+     *   1. 召回所有 status=2 候选帖子（排除已浏览/自己发的）
+     *   2. 对每个候选计算综合分：score = jaccard(用户画像tags, 帖子tags) * 0.7 + normHot * 0.3
+     *      （normHot = hot_score / max(hot_score)，归一化到 [0,1]）
+     *   3. 按 score DESC 全量排序（不再 filter score>0，让所有帖子都出现，只是顺序不同）
+     *   4. 应用 pageNum/pageSize 分页
+     *   5. 用户画像为空（未登录/无浏览/无 interest_tags） → 直接按 hot_score DESC 排序
+     *
+     * 返回结构：{ list: List&lt;RecommendPostVO&gt;, total: long, pageNum: int, pageSize: int }
      */
-    List<RecommendPostVO> getPostRecommend(Long userId, int limit);
+    Map<String, Object> getPostRecommend(Long userId, int pageNum, int pageSize);
 
     // ======================== 推荐效果 ========================
 

@@ -172,6 +172,9 @@ public class PaymentServiceImpl implements PaymentService {
 
     @Override
     public PaymentVO getPaymentByOrderId(Long orderId, Long userId) {
+        // 🔧 v8.58 修复：查无记录时返回 null 而不是抛异常。
+        // 理由：PaymentPage 初始化会调用本接口检查是否有已存在的支付记录，
+        //      首次进入时理应查不到 — 这是正常业务状态，不应触发全局 error toast。
         LambdaQueryWrapper<Payment> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Payment::getOrderId, orderId)
                 .eq(Payment::getUserId, userId)
@@ -180,9 +183,8 @@ public class PaymentServiceImpl implements PaymentService {
 
         Payment payment = paymentMapper.selectOne(wrapper);
         if (payment == null) {
-            throw new BusinessException(ResultCode.PAYMENT_FAILED.getCode(), "支付记录不存在");
+            return null;
         }
-
         return convertToVO(payment);
     }
 
