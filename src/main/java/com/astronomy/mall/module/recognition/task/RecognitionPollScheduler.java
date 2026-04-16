@@ -1,11 +1,13 @@
 package com.astronomy.mall.module.recognition.task;
 
 import com.alibaba.fastjson.JSON;
+import com.astronomy.mall.module.course.vo.CourseVO;
 import com.astronomy.mall.module.notification.helper.NotificationHelper;
 import com.astronomy.mall.module.recognition.entity.Recognition;
 import com.astronomy.mall.module.recognition.mapper.RecognitionMapper;
 import com.astronomy.mall.module.recognition.service.external.AstrometryService;
 import com.astronomy.mall.module.recognition.service.external.dto.AstrometryJobResult;
+import com.astronomy.mall.module.recommend.service.RecommendService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -21,6 +23,7 @@ import java.util.List;
  * 📌 触发条件: 每 30 秒执行一次
  * 📌 处理对象: 所有 status=0 且 submission_id 不为空的识别记录
  * 📌 2026-03-16 新增: 识别成功/失败后发送通知
+ * 📌 8.4 新增: 识别成功后推荐 Top1 匹配课程通知（interest_tags + machine_tags）
  *
  * 轮询流程（针对每条待处理记录）:
  * ┌──────────────────────────────────────────────────┐
@@ -40,6 +43,7 @@ public class RecognitionPollScheduler {
     private final RecognitionMapper recognitionMapper;
     private final AstrometryService astrometryService;
     private final NotificationHelper notificationHelper;  // 🆕
+    private final RecommendService recommendService;      // 🆕 8.4: 课程推荐服务
 
     private static final int TIMEOUT_MINUTES = 10;
 
@@ -160,6 +164,27 @@ public class RecognitionPollScheduler {
             } catch (Exception e) {
                 log.warn("[PollScheduler] 发送识别成功通知失败, recognitionId={}", recognitionId, e);
             }
+
+            // ── 🆕 8.4: 识别成功后推荐 Top1 匹配课程通知 ──
+            // 逻辑: 调用 RecommendService 获取基于 machine_tags 的课程推荐（Top1）
+            //        如果有推荐课程，发送「为你推荐课程」通知，出现在「推荐」Tab
+            // 注意: 推荐通知失败不影响识别成功主流程
+            try {
+                List<Object> courses = recommendService.getRecognitionCourseRecommend(recognitionId, 1);
+                if (courses != null && !courses.isEmpty()) {
+                    Object first = courses.get(0);
+                    if (first instanceof CourseVO) {
+                        CourseVO course = (CourseVO) first;
+                        notificationHelper.sendCourseRecommendNotification(
+                                userId, course.getTitle(), course.getId());
+                        log.info("[PollScheduler] 已发送课程推荐通知, recognitionId={}, courseId={}",
+                                recognitionId, course.getId());
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("[PollScheduler] 发送课程推荐通知失败, recognitionId={}", recognitionId, e);
+            }
+            // ── 8.4 课程推荐通知结束 ──
         }
     }
 

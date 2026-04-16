@@ -30,6 +30,10 @@ import java.util.Map;
  * 📌 2026-03-23 新增: sendCheckinNotification               (6.0 观测点签到成功)
  * 📌 2026-03-23 新增: sendWeatherSuitableNotification       (6.0 今晚观测条件极佳，默认disabled)
  * 📌 2026-04-08 新增 (7.8 论坛阶段二，6 个论坛业务通知):
+ *    📌 sendUserFollowedNotification 已在 7.5 实现，sendPostApproved/Rejected 在 7.7 实现
+ * 📌 2026-04-16 新增 (8.4 推荐系统通知集成，2 个):
+ *    sendProductRecommendNotification  - 降价 + interest_tags 命中时推荐商品
+ *    sendCourseRecommendNotification   - AI 识别成功后推荐 Top1 匹配课程
  *    sendPostLikedNotification        - 帖子被点赞     (防自通知)
  *    sendPostCommentedNotification    - 帖子被评论     (防自通知)
  *    sendCommentRepliedNotification   - 评论被回复     (防自通知)
@@ -894,6 +898,94 @@ public class NotificationHelper {
         if (s == null) return "";
         if (s.length() <= maxLen) return s;
         return s.substring(0, maxLen) + "...";
+    }
+
+    // ==================== 推荐系统通知 (8.4 新增，2种) ✅ 2026-04-16 ====================
+
+    /**
+     * 8.4: 推荐商品通知（降价 + interest_tags 命中时触发）
+     *
+     * 📌 触发时机: PriceDropScheduler.checkPriceDrop() 检测到降价后，
+     *    如果该用户的 interest_tags 与商品 tags 有交集，则额外发送此推荐通知
+     * 📌 通知模板: RECOMMEND_PRODUCT_RECOMMEND (module=recommend, type=product_recommend)
+     * 📌 模板变量: productName / price / productId
+     * 📌 跳转路径: /product/{productId}
+     * 📌 离散事件触发，不骚扰：仅在降价 + 兴趣命中时才推，不会无端推送
+     *
+     * @param userId      接收通知的用户 ID
+     * @param productName 商品名称
+     * @param price       商品当前价格（字符串，已格式化）
+     * @param productId   商品 ID（用于跳转）
+     */
+    @Async
+    public void sendProductRecommendNotification(Long userId, String productName,
+                                                  String price, Long productId) {
+        if (userId == null || productId == null) return;
+
+        try {
+            Map<String, Object> variables = new HashMap<>();
+            variables.put("productName", productName == null ? "精选商品" : truncate(productName, 30));
+            variables.put("price", price == null ? "" : price);
+            variables.put("productId", productId.toString());
+
+            SendNotificationDTO dto = SendNotificationDTO.builder()
+                    .userId(userId)
+                    .module("recommend")
+                    .type("product_recommend")
+                    .relatedId(productId)
+                    .relatedType("product")
+                    .priority(0)
+                    .variables(variables)
+                    .build();
+
+            notificationService.sendNotification(dto);
+            log.info("[8.4] 推荐商品通知已发送: userId={}, productId={}, productName={}",
+                    userId, productId, productName);
+        } catch (Exception e) {
+            log.error("[8.4] 发送推荐商品通知失败: userId={}, productId={}", userId, productId, e);
+        }
+    }
+
+    /**
+     * 8.4: 推荐课程通知（AI 识别成功后 Top1 匹配课程）
+     *
+     * 📌 触发时机: RecognitionPollScheduler.handleSuccess() 识别成功后，
+     *    调用 RecommendService.getRecognitionCourseRecommend() 获取 Top1 课程，
+     *    仅在有匹配课程时发送（不是每次识别都推）
+     * 📌 通知模板: RECOMMEND_COURSE_RECOMMEND (module=recommend, type=course_recommend)
+     * 📌 模板变量: courseName / courseId
+     * 📌 跳转路径: /course/{courseId}
+     * 📌 离散事件触发，不骚扰：仅在识别成功且有匹配课程时推 1 条
+     *
+     * @param userId     接收通知的用户 ID
+     * @param courseName 课程名称
+     * @param courseId   课程 ID（用于跳转）
+     */
+    @Async
+    public void sendCourseRecommendNotification(Long userId, String courseName, Long courseId) {
+        if (userId == null || courseId == null) return;
+
+        try {
+            Map<String, Object> variables = new HashMap<>();
+            variables.put("courseName", courseName == null ? "精选课程" : truncate(courseName, 40));
+            variables.put("courseId", courseId.toString());
+
+            SendNotificationDTO dto = SendNotificationDTO.builder()
+                    .userId(userId)
+                    .module("recommend")
+                    .type("course_recommend")
+                    .relatedId(courseId)
+                    .relatedType("course")
+                    .priority(0)
+                    .variables(variables)
+                    .build();
+
+            notificationService.sendNotification(dto);
+            log.info("[8.4] 推荐课程通知已发送: userId={}, courseId={}, courseName={}",
+                    userId, courseId, courseName);
+        } catch (Exception e) {
+            log.error("[8.4] 发送推荐课程通知失败: userId={}, courseId={}", userId, courseId, e);
+        }
     }
 
     // ==================== 系统模块通知 ====================

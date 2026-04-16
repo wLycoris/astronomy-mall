@@ -575,13 +575,19 @@ public class RecommendServiceImpl implements RecommendService {
         Long userId = recognition.getUserId();  // 可能为 null（游客）
 
         // 2. 解析 machine_tags 并映射为中文关键字
+        //    🔧 2026-04-16 修复: 由精确匹配改为子串包含匹配
+        //    原因: Astrometry.net 返回的 machine_tags 常带限定词，如 "Andromeda Galaxy"/"emission nebula"，
+        //          精确匹配 "galaxy"/"nebula" 会全部 miss，导致永远走不到标签推荐分支。
         Set<String> machineTags = parseTags(recognition.getMachineTags());
         Set<String> zhKeywords = new LinkedHashSet<>();
         for (String tag : machineTags) {
             if (tag == null) continue;
-            List<String> mapped = EN_TO_ZH_TAG_MAPPING.get(tag.toLowerCase().trim());
-            if (mapped != null) {
-                zhKeywords.addAll(mapped);
+            String lowerTag = tag.toLowerCase().trim();
+            for (Map.Entry<String, List<String>> entry : EN_TO_ZH_TAG_MAPPING.entrySet()) {
+                // 子串包含即命中（"andromeda galaxy".contains("galaxy") = true）
+                if (lowerTag.contains(entry.getKey())) {
+                    zhKeywords.addAll(entry.getValue());
+                }
             }
         }
         log.debug("[8.3.1] recognitionId={} machineTags={} → zhKeywords={}",
@@ -603,10 +609,14 @@ public class RecommendServiceImpl implements RecommendService {
         }
 
         // 5. 命中不足 → 用热门课程补齐（排除已入选 + 已学）
+        //    🔧 2026-04-16 修复: 从 getHotCourses(userId, limit*2) 改为取固定 Math.max(limit*10, 20) 条
+        //    原因: 活跃用户已学课程多（如用户 10001 已学 29 门，全库 51 门），
+        //          limit*2 仅取 Top2 热门，容易全被已学过滤掉 → 兜底返回空 → 不发通知
         if (matched.size() < limit) {
             Set<Long> existIds = matched.stream().map(CourseVO::getId).collect(Collectors.toSet());
             existIds.addAll(learnedCourseIds);
-            List<CourseVO> hot = courseMapper.getHotCourses(userId, limit * 2).stream()
+            int poolSize = Math.max(limit * 10, 20);  // 至少拿 20 门候选兜底
+            List<CourseVO> hot = courseMapper.getHotCourses(userId, poolSize).stream()
                     .filter(vo -> !existIds.contains(vo.getId()))
                     .limit(limit - matched.size())
                     .collect(Collectors.toList());
