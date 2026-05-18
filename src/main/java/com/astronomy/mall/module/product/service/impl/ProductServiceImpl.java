@@ -1,6 +1,7 @@
 package com.astronomy.mall.module.product.service.impl;
 
 import cn.hutool.core.util.StrUtil;
+import com.alibaba.fastjson.JSON;
 import com.astronomy.mall.common.exception.BusinessException;
 import com.astronomy.mall.common.result.ResultCode;
 import com.astronomy.mall.module.product.dto.*;
@@ -18,6 +19,7 @@ import javax.annotation.Resource;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -144,9 +146,7 @@ public class ProductServiceImpl implements ProductService {
         vo.setCategoryName(category != null ? category.getCategoryName() : "");
 
         // 处理图片列表
-        if (StrUtil.isNotBlank(product.getImages())) {
-            vo.setImageList(Arrays.asList(product.getImages().split(",")));
-        }
+        vo.setImageList(parseProductImages(product));
 
         // 安全转换评价统计
         Number reviewCount = (Number) reviewStats.get("reviewCount");
@@ -219,6 +219,35 @@ public class ProductServiceImpl implements ProductService {
         vo.setAvgRating(avgRatingObj == null ? 0.0 : ((BigDecimal) avgRatingObj).doubleValue());
 
         return vo;
+    }
+
+    private List<String> parseProductImages(Product product) {
+        List<String> images = new ArrayList<>();
+        if (StrUtil.isNotBlank(product.getImages())) {
+            String raw = product.getImages().trim();
+            try {
+                if (raw.startsWith("[")) {
+                    images.addAll(JSON.parseArray(raw, String.class));
+                } else {
+                    images.addAll(Arrays.asList(raw.split(",")));
+                }
+            } catch (Exception ignored) {
+                images.addAll(Arrays.asList(raw.split(",")));
+            }
+        }
+        images = images.stream()
+                .filter(StrUtil::isNotBlank)
+                .map(String::trim)
+                .filter(item -> item.startsWith("data:image")
+                        || item.startsWith("http://")
+                        || item.startsWith("https://")
+                        || item.startsWith("/"))
+                .distinct()
+                .collect(Collectors.toList());
+        if (StrUtil.isNotBlank(product.getMainImage()) && !images.contains(product.getMainImage())) {
+            images.add(0, product.getMainImage());
+        }
+        return images.isEmpty() ? Collections.emptyList() : images;
     }
 
     /**
