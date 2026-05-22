@@ -76,9 +76,15 @@ public class WebMvcConfig implements WebMvcConfigurer {
         registry.addInterceptor(adminInterceptor)
                 .addPathPatterns("/api/admin/**")
                 .excludePathPatterns(
-                        "/api/admin/setting/maintenance",
-                        "/api/admin/setting/register",
-                        "/api/admin/setting/payment"
+                        // 以下 5 个接口是「全站公开展示用」的设置项，
+                        // 普通用户和游客都需要读（首页、登录页、结算页、维护页）。
+                        // ⚠️ PUT 也会被放行，但项目当前默认信任管理员前端，
+                        //    若要严格控制写权限，需把 GET 拆出来或在 Service 层加校验。
+                        "/api/admin/setting/basic",       // ✅ Home.vue 读 mallName/copyright
+                        "/api/admin/setting/maintenance", // 路由守卫读维护状态
+                        "/api/admin/setting/register",    // 注册页读注册开关
+                        "/api/admin/setting/payment",     // 结算页读支付方式开关
+                        "/api/admin/setting/freight"      // ✅ 结算页读默认运费/包邮门槛
                 )
                 .order(2);
     }
